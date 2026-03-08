@@ -1,0 +1,7 @@
+{
+  "name": "Bible Mood Search – AI Scripture Companion React Native",
+  "description": "An AI-powered mobile scripture companion for mood-based Bible search, spiritual encouragement, and real-time voice chat.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
