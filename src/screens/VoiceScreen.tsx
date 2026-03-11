@@ -290,27 +290,32 @@ export default function VoiceScreen({ navigation }: any) {
     
     isPlaying.current = true;
     setIsDavidSpeaking(true);
+    setIsDavidThinking(false);
     
-    while (audioQueue.current.length > 0) {
-      const chunk = audioQueue.current.shift();
-      if (chunk) {
-        await playAudio(chunk);
+    try {
+      while (audioQueue.current.length > 0) {
+        const chunk = audioQueue.current.shift();
+        if (chunk) {
+          await playAudio(chunk);
+        }
       }
+    } catch (err) {
+      addLog(`Queue processing error: ${err}`);
+    } finally {
+      isPlaying.current = false;
+      setIsDavidSpeaking(false);
     }
-    
-    isPlaying.current = false;
-    setIsDavidSpeaking(false);
   };
 
   const playAudio = async (base64Data: string): Promise<void> => {
     const context = getAudioContext(16000);
     
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+
     return new Promise((resolve) => {
       try {
-        if (context.state === 'suspended') {
-          context.resume();
-        }
-
         const binary = atob(base64Data);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -322,21 +327,14 @@ export default function VoiceScreen({ navigation }: any) {
           float32Data[i] = pcmData[i] / 32768.0;
         }
         
-        // The model output is usually 24kHz, but if we set context to 16kHz, 
-        // we should try to match it or let the context handle it.
-        // Actually, let's check the actual rate of the received audio.
-        // Most Gemini models return 24kHz audio.
+        // Gemini Live returns 24kHz PCM
         const audioBuffer = context.createBuffer(1, float32Data.length, 24000);
         audioBuffer.getChannelData(0).set(float32Data);
         
-        addLog(`Playback started (${float32Data.length} samples)`);
         const source = context.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(context.destination);
-        source.onended = () => {
-          addLog("Playback finished");
-          resolve();
-        };
+        source.onended = () => resolve();
         source.start();
       } catch (err) {
         addLog(`Playback error: ${err}`);
