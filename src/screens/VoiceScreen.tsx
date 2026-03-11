@@ -98,78 +98,76 @@ export default function VoiceScreen({ navigation }: any) {
         (window as any).GEMINI_API_KEY || 
         "";
       
-      addLog(`Gemini key present: ${!!apiKey}`);
-      console.log("Gemini key present:", !!apiKey);
-
+      addLog(`API Key present: ${!!apiKey}`);
       if (!apiKey) {
-        throw new Error("Gemini API Key is missing. Please ensure it is set in the Secrets panel or selected via the key selector.");
+        setError("Gemini API Key is missing. Please set it in the Secrets panel.");
+        setIsConnecting(false);
+        return;
       }
 
       const ai = new GoogleGenAI({ apiKey });
       
-      addLog("Connecting to Live API (12-2025)...");
+      addLog("Starting Live connection (09-2025)...");
       const session = await ai.live.connect({
-        model: "gemini-2.5-flash-native-audio-preview-12-2025",
+        model: "gemini-2.5-flash-native-audio-preview-09-2025",
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
           },
-          systemInstruction: "You are David, a warm, compassionate AI Bible companion. This is a real-time voice conversation. RESPOND IMMEDIATELY AND VERY BRIEFLY (1 sentence max). Be warm, natural, and conversational. Do not wait. If the user stops speaking, respond right away with a word of peace or encouragement.",
+          systemInstruction: "You are David, a warm, compassionate AI Bible companion. This is a real-time voice conversation. Respond naturally and warmly. Keep responses concise (1-2 sentences).",
         },
         callbacks: {
           onopen: () => {
-            addLog("Session opened");
+            addLog("WebSocket opened successfully");
             setIsConnected(true);
             setIsConnecting(false);
             startAudioCapture();
           },
           onmessage: async (message) => {
-            // Log the type of message received
             if (message.setupComplete) {
-              addLog("Setup complete received");
+              addLog("Model setup complete");
             }
             
             if (message.serverContent?.modelTurn) {
-              addLog("David is responding...");
+              addLog("Model response received");
               setIsDavidThinking(false);
               const parts = message.serverContent.modelTurn.parts;
               if (parts) {
                 for (const part of parts) {
                   if (part.inlineData?.data) {
-                    addLog(`Audio chunk received: ${part.inlineData.data.length} bytes`);
+                    addLog(`Audio chunk received (${part.inlineData.data.length} bytes)`);
                     audioQueue.current.push(part.inlineData.data);
                     processAudioQueue();
                   }
                   if (part.text) {
-                    addLog(`David said (text): ${part.text}`);
+                    addLog(`Model text: ${part.text}`);
                   }
                 }
               }
             }
             
             if (message.serverContent?.interrupted) {
-              addLog("David was interrupted");
+              addLog("Model interrupted");
               setIsDavidSpeaking(false);
               setIsDavidThinking(false);
               audioQueue.current = [];
             }
           },
-          onclose: () => {
-            addLog("Session closed");
+          onclose: (event: any) => {
+            addLog(`WebSocket closed: ${event?.reason || 'No reason'}`);
             setIsConnected(false);
+            setIsConnecting(false);
             stopAudioCapture();
           },
           onerror: (err: any) => {
-            addLog(`Error: ${err?.message || JSON.stringify(err)}`);
+            const errorMsg = err?.message || "Unknown WebSocket error";
+            addLog(`WebSocket failed: ${errorMsg}`);
             console.error("Live API Error:", err);
             setIsConnecting(false);
-            if (err?.message?.includes("Requested entity was not found")) {
-              setHasKey(false);
-              setError("API Key error. Please select a valid paid API key.");
-            } else {
-              setError(`Connection error: ${err?.message || "Unknown error"}`);
-            }
+            setIsConnected(false);
+            setError(`Connection error: ${errorMsg}`);
+            stopAudioCapture();
           }
         }
       });
@@ -238,14 +236,16 @@ export default function VoiceScreen({ navigation }: any) {
             }
             const base64Data = btoa(binary);
 
-            sessionRef.current.sendRealtimeInput({
-              media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
-            });
-
-            const now = Date.now();
-            if (now - lastSendTime > 1000) {
-              addLog("Sending audio...");
-              lastSendTime = now;
+            if (sessionRef.current) {
+              sessionRef.current.sendRealtimeInput({
+                media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+              });
+              
+              const now = Date.now();
+              if (now - lastSendTime > 2000) {
+                addLog(`Audio chunk sent (${base64Data.length} chars)`);
+                lastSendTime = now;
+              }
             }
           } else {
             silenceFrames++;
@@ -257,7 +257,13 @@ export default function VoiceScreen({ navigation }: any) {
       };
 
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      
+      // Silent connection to destination to keep processor alive without feedback
+      const silentGain = audioContext.createGain();
+      silentGain.gain.value = 0;
+      processor.connect(silentGain);
+      silentGain.connect(audioContext.destination);
+      
       setIsListening(true);
       addLog("Audio capture started");
     } catch (err: any) {
@@ -323,10 +329,14 @@ export default function VoiceScreen({ navigation }: any) {
         const audioBuffer = context.createBuffer(1, float32Data.length, 24000);
         audioBuffer.getChannelData(0).set(float32Data);
         
+        addLog(`Playback started (${float32Data.length} samples)`);
         const source = context.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(context.destination);
-        source.onended = () => resolve();
+        source.onended = () => {
+          addLog("Playback finished");
+          resolve();
+        };
         source.start();
       } catch (err) {
         addLog(`Playback error: ${err}`);
