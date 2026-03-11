@@ -1,11 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { Mic, MicOff, Lock, Sparkles } from 'lucide-react';
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  GoogleGenAI,
+  Modality,
+  StartSensitivity,
+  EndSensitivity,
+} from '@google/genai';
 import { supabase } from '../services/supabase';
 import { Profile } from '../types';
-import { GoogleGenAI, Modality } from "@google/genai";
 import { hasProAccess } from '../utils/tier';
+
+declare global {
+  interface Window {
+    aistudio?: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
+const VOICE_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
+const DAVID_VOICE = 'Algenib';
 
 export default function VoiceScreen({ navigation }: any) {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -14,42 +32,86 @@ export default function VoiceScreen({ navigation }: any) {
   const [isListening, setIsListening] = useState(false);
   const [isDavidSpeaking, setIsDavidSpeaking] = useState(false);
   const [hasKey, setHasKey] = useState(true);
+  const [davidText, setDavidText] = useState<string | null>(null);
+
   const sessionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const captureCtxRef = useRef<AudioContext | null>(null);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const muteGainRef = useRef<GainNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  const isConnectedRef = useRef(false);
+  const isDavidSpeakingRef = useRef(false);
+
+  const silenceTimerRef = useRef<number | null>(null);
+  const playbackChainRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     fetchProfile();
     checkApiKey();
+
     return () => {
       stopSession();
     };
   }, []);
 
+  const fetchProfile = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    if (data) setProfile(data);
+  };
+
   const checkApiKey = async () => {
-    if ((window as any).aistudio) {
-      const selected = await (window as any).aistudio.hasSelectedApiKey();
+    if (window.aistudio) {
+      const selected = await window.aistudio.hasSelectedApiKey();
       setHasKey(selected);
     }
   };
 
   const handleOpenKeySelector = async () => {
-    if ((window as any).aistudio) {
-      await (window as any).aistudio.openSelectKey();
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
       setHasKey(true);
     }
   };
 
-  const fetchProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      if (data) setProfile(data);
+  const clearSilenceTimer = () => {
+    if (silenceTimerRef.current) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
     }
+  };
+
+  const scheduleAudioStreamEnd = () => {
+    clearSilenceTimer();
+    silenceTimerRef.current = window.setTimeout(() => {
+      if (!sessionRef.current || !isConnectedRef.current) return;
+      try {
+        console.log('[Voice] Silence detected -> sending audioStreamEnd');
+        sessionRef.current.sendRealtimeInput({ audioStreamEnd: true });
+      } catch (err) {
+        console.error('[Voice] Failed to send audioStreamEnd:', err);
+      }
+    }, 1200s);
+  };
+
+  const getPlaybackContext = async () => {
+    if (!playbackCtxRef.current || playbackCtxRef.current.state === 'closed') {
+      playbackCtxRef.current = new (window.AudioContext || window.webkitAudioContext!)();
+    }
+    if (playbackCtxRef.current.state === 'suspended') {
+      await playbackCtxRef.current.resume();
+    }
+    return playbackCtxRef.current;
   };
 
   const startSession = async () => {
@@ -58,188 +120,346 @@ export default function VoiceScreen({ navigation }: any) {
       return;
     }
 
-    if (!hasKey && (window as any).aistudio) {
+    if (!hasKey && window.aistudio) {
       await handleOpenKeySelector();
     }
 
     setIsConnecting(true);
+    setDavidText(null);
+
     try {
-      // Ensure AudioContext is created on user gesture
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      }
-      
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
+      const apiKey = process.env.GEMINI_API_KEY || '';
+      if (!apiKey) {
+        alert('Missing GEMINI_API_KEY environment variable.');
+        setIsConnecting(false);
+        return;
       }
 
-      const apiKey = process.env.GEMINI_API_KEY || (process.env as any).API_KEY || "";
+      await getPlaybackContext();
+
       const ai = new GoogleGenAI({ apiKey });
-      
+
+      console.log('[Voice] Connecting to Gemini Live API...');
+
       const session = await ai.live.connect({
-        model: "gemini-2.5-flash-native-audio-preview-09-2025",
+        model: VOICE_MODEL,
         config: {
           responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } }, // Zephyr is closest to "David"
+          outputAudioTranscription: {},
+          inputAudioTranscription: {},
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: false,
+              startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+              endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+              prefixPaddingMs: 10,
+              silenceDurationMs: 120,
+            },
           },
-          systemInstruction: "You are David, a warm, compassionate, and grounded AI Bible companion. You are in a real-time voice conversation with a user. Your goal is to listen deeply and provide brief, scripture-based encouragement. Keep your responses short (1-3 sentences) so the conversation flows naturally. If the user is silent, you can gently ask how they are feeling or if they'd like to hear a verse of peace. Always be kind and grounded in the Word.",
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: DAVID_VOICE,
+              },
+            },
+          },
+          systemInstruction: `
+You are David, a calm, compassionate Christian male voice companion.
+
+You should sound like a real human man speaking naturally, warmly, and thoughtfully.
+Speak slowly, with natural pauses, gentle breathing room between ideas, and a grounded pastoral presence.
+
+Do not sound robotic, overly polished, or scripted.
+
+Speech style rules:
+- Speak in a warm, masculine, emotionally grounded tone.
+- Use short pauses between thoughts.
+- Occasionally use soft conversational fillers like "hmm", "well", "you know", "ah", or "let me think".
+- Vary your rhythm so you sound alive and human.
+- Never rush.
+- Keep your tone calm, reassuring, reflective, and kind.
+- Speak like a trusted Christian friend or soft-spoken pastor.
+- When comforting the user, sound present and sincere.
+- When sharing scripture, weave it in naturally, not like a sermon.
+
+Response length:
+- Usually 1 to 3 sentences.
+- If the user is emotional, slow down and be extra gentle.
+- If the user asks for more, you may expand naturally.
+
+You are grounded in the Bible, peaceful, deeply human, and conversational.
+`,
         },
         callbacks: {
           onopen: () => {
+            console.log('[Voice] Session connected');
+            isConnectedRef.current = true;
             setIsConnected(true);
             setIsConnecting(false);
             startAudioCapture();
           },
-          onmessage: async (message) => {
-            console.log("Received message from David:", message);
-            const parts = message.serverContent?.modelTurn?.parts;
-            if (parts) {
-              setIsDavidSpeaking(true);
-              for (const part of parts) {
-                if (part.inlineData?.data) {
-                  try {
-                    await playAudio(part.inlineData.data);
-                  } catch (e) {
-                    console.error("Playback error:", e);
-                  }
-                }
-              }
+
+          onmessage: (message: any) => {
+            if (message.setupComplete) {
+              console.log('[Voice] Setup complete');
+              return;
+            }
+
+            if (message.serverContent?.inputTranscription?.text) {
+              console.log('[Voice] Input transcript:', message.serverContent.inputTranscription.text);
+            }
+
+            if (message.serverContent?.outputTranscription?.text) {
+              console.log('[Voice] Output transcript:', message.serverContent.outputTranscription.text);
+              setDavidText(message.serverContent.outputTranscription.text);
+            }
+
+            if (message.serverContent?.interrupted) {
+              console.log('[Voice] Model interrupted');
+              isDavidSpeakingRef.current = false;
               setIsDavidSpeaking(false);
+              return;
+            }
+
+            if (message.serverContent?.turnComplete) {
+              console.log('[Voice] Turn complete');
+              isDavidSpeakingRef.current = false;
+              setIsDavidSpeaking(false);
+              return;
+            }
+
+            const parts = message.serverContent?.modelTurn?.parts ?? [];
+            if (!parts.length) return;
+
+            for (const part of parts) {
+              if (part.inlineData?.data) {
+                isDavidSpeakingRef.current = true;
+                setIsDavidSpeaking(true);
+
+                playbackChainRef.current = playbackChainRef.current.then(() =>
+                  playAudioChunk(part.inlineData.data)
+                );
+              }
+
+              if (part.text) {
+                setDavidText(part.text);
+              }
             }
           },
-          onclose: () => {
+
+          onclose: (event: any) => {
+            console.log('[Voice] Session closed:', event?.reason || 'no reason');
+            isConnectedRef.current = false;
             setIsConnected(false);
+            isDavidSpeakingRef.current = false;
+            setIsDavidSpeaking(false);
+            setIsConnecting(false);
             stopAudioCapture();
           },
+
           onerror: (err: any) => {
-            console.error("Live API Error:", err);
+            console.error('[Voice] Live API error:', err);
+            isConnectedRef.current = false;
+            setIsConnected(false);
+            isDavidSpeakingRef.current = false;
+            setIsDavidSpeaking(false);
             setIsConnecting(false);
-            if (err?.message?.includes("Requested entity was not found")) {
+
+            const msg = err?.message || 'Unknown connection error';
+            if (msg.includes('Requested entity was not found')) {
               setHasKey(false);
-              alert("API Key error. Please select a valid paid API key.");
-            } else {
-              alert("Connection error. Please try again.");
             }
-          }
-        }
+            alert(`Voice connection error: ${msg}`);
+          },
+        },
       });
+
       sessionRef.current = session;
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error('[Voice] Failed to start session:', error);
       setIsConnecting(false);
+      alert(`Failed to start voice session: ${error?.message || 'Unknown error'}`);
     }
   };
 
   const stopSession = () => {
+    console.log('[Voice] Stopping session...');
+    clearSilenceTimer();
+
     if (sessionRef.current) {
-      sessionRef.current.close();
+      try {
+        sessionRef.current.close();
+      } catch (err) {
+        console.error('[Voice] Error closing session:', err);
+      }
       sessionRef.current = null;
     }
+
     stopAudioCapture();
+
+    isConnectedRef.current = false;
     setIsConnected(false);
+    isDavidSpeakingRef.current = false;
+    setIsDavidSpeaking(false);
+    setIsConnecting(false);
+
+    if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
+      playbackCtxRef.current.close().catch(() => { });
+      playbackCtxRef.current = null;
+    }
   };
 
   const startAudioCapture = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-      const audioContext = audioContextRef.current;
-      
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume();
+      console.log('[Voice] Starting microphone capture...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      mediaStreamRef.current = stream;
+
+      if (!captureCtxRef.current || captureCtxRef.current.state === 'closed') {
+        captureCtxRef.current = new (window.AudioContext || window.webkitAudioContext!)({
+          sampleRate: 16000,
+        });
       }
 
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const ctx = captureCtxRef.current;
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+
+      const source = ctx.createMediaStreamSource(stream);
+      sourceRef.current = source;
+
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
-      processor.onaudioprocess = (e) => {
-        if (sessionRef.current && isConnected && !isDavidSpeaking) {
-          const inputData = e.inputBuffer.getChannelData(0);
-          // Simple silence detection to avoid sending noise
-          let sum = 0;
-          for (let i = 0; i < inputData.length; i++) sum += Math.abs(inputData[i]);
-          const average = sum / inputData.length;
-          
-          if (average > 0.005) { // Only send if there's actual sound
-            const pcmData = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) {
-              pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-            }
-            
-            let binary = '';
-            const bytes = new Uint8Array(pcmData.buffer);
-            for (let i = 0; i < bytes.byteLength; i++) {
-              binary += String.fromCharCode(bytes[i]);
-            }
-            const base64Data = btoa(binary);
+      const muteGain = ctx.createGain();
+      muteGain.gain.value = 0;
+      muteGainRef.current = muteGain;
 
-            sessionRef.current.sendRealtimeInput({
-              media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
-            });
-          }
+      processor.onaudioprocess = (e) => {
+        if (!sessionRef.current || !isConnectedRef.current || isDavidSpeakingRef.current) {
+          return;
+        }
+
+        const input = e.inputBuffer.getChannelData(0);
+
+        let energy = 0;
+        for (let i = 0; i < input.length; i++) {
+          energy += Math.abs(input[i]);
+        }
+        const average = energy / input.length;
+
+        if (average < 0.003) {
+          scheduleAudioStreamEnd();
+          return;
+        }
+
+        clearSilenceTimer();
+
+        const pcm16 = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+
+        const bytes = new Uint8Array(pcm16.buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Audio = btoa(binary);
+
+        try {
+          sessionRef.current.sendRealtimeInput({
+            audio: {
+              data: base64Audio,
+              mimeType: 'audio/pcm;rate=16000',
+            },
+          });
+        } catch (err) {
+          console.error('[Voice] Failed to send audio chunk:', err);
         }
       };
 
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      processor.connect(muteGain);
+      muteGain.connect(ctx.destination);
+
       setIsListening(true);
+      console.log('[Voice] Microphone capture active');
     } catch (err) {
-      console.error("Microphone access denied:", err);
-      alert("Microphone access is required for voice chat.");
+      console.error('[Voice] Microphone access denied:', err);
+      alert('Microphone access is required for voice chat.');
+      stopSession();
     }
   };
 
   const stopAudioCapture = () => {
+    console.log('[Voice] Stopping audio capture...');
+    clearSilenceTimer();
+
     if (processorRef.current) {
       processorRef.current.disconnect();
+      processorRef.current.onaudioprocess = null;
       processorRef.current = null;
     }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
     }
+
+    if (muteGainRef.current) {
+      muteGainRef.current.disconnect();
+      muteGainRef.current = null;
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    if (captureCtxRef.current && captureCtxRef.current.state !== 'closed') {
+      captureCtxRef.current.close().catch(() => { });
+      captureCtxRef.current = null;
+    }
+
     setIsListening(false);
   };
 
-  const playAudio = async (base64Data: string): Promise<void> => {
-    if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    }
-    
-    const context = audioContextRef.current;
-    
-    return new Promise((resolve) => {
-      try {
-        if (context.state === 'suspended') {
-          context.resume();
-        }
+  const playAudioChunk = async (base64Data: string) => {
+    const context = await getPlaybackContext();
 
-        const binary = atob(base64Data);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        
-        const pcmData = new Int16Array(bytes.buffer);
-        const float32Data = new Float32Array(pcmData.length);
-        for (let i = 0; i < pcmData.length; i++) {
-          float32Data[i] = pcmData[i] / 32768.0;
-        }
-        
-        const audioBuffer = context.createBuffer(1, float32Data.length, 24000);
-        audioBuffer.getChannelData(0).set(float32Data);
-        
-        const source = context.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(context.destination);
-        source.onended = () => resolve();
-        source.start();
-      } catch (err) {
-        console.error("Error playing audio chunk:", err);
-        resolve(); // Resolve anyway to continue the loop
-      }
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    const pcm16 = new Int16Array(bytes.buffer);
+    if (!pcm16.length) return;
+
+    const float32 = new Float32Array(pcm16.length);
+    for (let i = 0; i < pcm16.length; i++) {
+      float32[i] = pcm16[i] / 32768;
+    }
+
+    const buffer = context.createBuffer(1, float32.length, 24000);
+    buffer.getChannelData(0).set(float32);
+
+    await new Promise<void>((resolve) => {
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.onended = () => resolve();
+      source.start(0);
     });
   };
 
@@ -252,10 +472,7 @@ export default function VoiceScreen({ navigation }: any) {
           <Text style={styles.lockText}>
             Upgrade to Pro to experience real-time voice conversations with David.
           </Text>
-          <TouchableOpacity 
-            style={styles.upgradeButton} 
-            onPress={() => navigation.navigate('Profile')}
-          >
+          <TouchableOpacity style={styles.upgradeButton} onPress={() => navigation.navigate('Profile')}>
             <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
           </TouchableOpacity>
         </View>
@@ -276,14 +493,14 @@ export default function VoiceScreen({ navigation }: any) {
           {isConnected && (
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ 
+              animate={{
                 scale: isDavidSpeaking ? [1, 1.3, 1] : isListening ? [1, 1.1, 1] : 1,
                 opacity: isDavidSpeaking ? [0.3, 0.6, 0.3] : isListening ? [0.2, 0.4, 0.2] : 0.1,
               }}
-              transition={{ 
-                duration: isDavidSpeaking ? 1.5 : 3, 
+              transition={{
+                duration: isDavidSpeaking ? 1.5 : 3,
                 repeat: Infinity,
-                ease: "easeInOut" 
+                ease: 'easeInOut',
               }}
               style={{
                 position: 'absolute',
@@ -297,14 +514,11 @@ export default function VoiceScreen({ navigation }: any) {
             />
           )}
         </AnimatePresence>
-        
+
         <View style={[styles.mainCircle, isConnected && styles.mainActive]}>
           {isConnected ? (
             isDavidSpeaking ? (
-              <motion.div
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ duration: 0.5, repeat: Infinity }}
-              >
+              <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 0.5, repeat: Infinity }}>
                 <Sparkles color="#d4af37" size={48} />
               </motion.div>
             ) : (
@@ -318,9 +532,22 @@ export default function VoiceScreen({ navigation }: any) {
 
       <View style={styles.statusContainer}>
         <Text style={styles.statusText}>
-          {isConnecting ? "Connecting..." : isDavidSpeaking ? "David is speaking..." : isConnected ? "David is listening..." : "Tap to start conversation"}
+          {isConnecting
+            ? 'Connecting...'
+            : isDavidSpeaking
+              ? 'David is speaking...'
+              : isConnected
+                ? 'David is listening...'
+                : 'Tap to start conversation'}
         </Text>
       </View>
+
+      {davidText && (
+        <View style={styles.textFallback}>
+          <Text style={styles.textFallbackLabel}>David says:</Text>
+          <Text style={styles.textFallbackContent}>{davidText}</Text>
+        </View>
+      )}
 
       {!hasKey && (
         <TouchableOpacity style={styles.keyWarning} onPress={handleOpenKeySelector}>
@@ -328,20 +555,21 @@ export default function VoiceScreen({ navigation }: any) {
         </TouchableOpacity>
       )}
 
-      <TouchableOpacity 
-        style={[styles.actionButton, isConnected ? styles.stopButton : styles.startButton]} 
+      <TouchableOpacity
+        style={[styles.actionButton, isConnected ? styles.stopButton : styles.startButton]}
         onPress={isConnected ? stopSession : startSession}
         disabled={isConnecting}
       >
         {isConnecting ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.actionButtonText}>{isConnected ? "End Session" : "Start Conversation"}</Text>
+          <Text style={styles.actionButtonText}>{isConnected ? 'End Session' : 'Start Conversation'}</Text>
         )}
       </TouchableOpacity>
-      
+
       <Text style={styles.disclaimer}>
-        David is an AI spiritual companion. For professional guidance or pastoral care, please consult your local church or a qualified advisor.
+        David is an AI spiritual companion. For professional guidance or pastoral care, please consult your
+        local church or a qualified advisor.
       </Text>
     </View>
   );
@@ -395,19 +623,6 @@ const styles = StyleSheet.create({
   mainActive: {
     backgroundColor: '#0f2a52',
     borderColor: '#f5d77a',
-  },
-  pulseCircle: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(212, 175, 55, 0.1)',
-    zIndex: 1,
-  },
-  pulseActive: {
-    // In a real app we'd animate this
-    transform: [{ scale: 1.2 }],
-    opacity: 0.5,
   },
   statusContainer: {
     marginBottom: 40,
@@ -521,5 +736,28 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 1,
-  }
+  },
+  textFallback: {
+    backgroundColor: 'rgba(212, 175, 55, 0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.2)',
+  },
+  textFallbackLabel: {
+    color: '#d4af37',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  textFallbackContent: {
+    color: '#f5d77a',
+    fontSize: 14,
+    lineHeight: 20,
+    fontStyle: 'italic',
+  },
 });
