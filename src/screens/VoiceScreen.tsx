@@ -17,7 +17,7 @@ export default function VoiceScreen({ navigation }: any) {
   const [hasKey, setHasKey] = useState(true);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [showDebug, setShowDebug] = useState(true);
+  const [showDebug, setShowDebug] = useState(false);
   const [lastResponseText, setLastResponseText] = useState<string | null>(null);
   const [isDavidProcessing, setIsDavidProcessing] = useState(false);
   
@@ -305,9 +305,17 @@ export default function VoiceScreen({ navigation }: any) {
       let lastSendTime = 0;
 
       processor.onaudioprocess = (e) => {
-        if (sessionRef.current && isConnected && !isDavidSpeaking) {
+        const session = sessionRef.current;
+        // Use sessionRef directly to avoid closure issues with isConnected state
+        if (session && !isDavidSpeaking) {
           const inputData = e.inputBuffer.getChannelData(0);
           
+          // Debug: Log buffer info occasionally
+          const now = Date.now();
+          if (now - lastSendTime > 5000) {
+            addLog(`onaudioprocess: buffer size=${inputData.length}, first sample=${inputData[0]?.toFixed(4)}`);
+          }
+
           // Simple silence detection
           let sum = 0;
           for (let i = 0; i < inputData.length; i++) sum += Math.abs(inputData[i]);
@@ -317,11 +325,15 @@ export default function VoiceScreen({ navigation }: any) {
             silenceFrames = 0;
             setIsDavidThinking(false);
             
+            // Convert Float32 to PCM16
             const pcmData = new Int16Array(inputData.length);
             for (let i = 0; i < inputData.length; i++) {
-              pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+              // Clamp and scale
+              const s = Math.max(-1, Math.min(1, inputData[i]));
+              pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
             
+            // Convert to Base64
             const bytes = new Uint8Array(pcmData.buffer);
             let binary = '';
             for (let i = 0; i < bytes.byteLength; i++) {
@@ -329,16 +341,17 @@ export default function VoiceScreen({ navigation }: any) {
             }
             const base64Data = btoa(binary);
 
-            if (sessionRef.current) {
-              sessionRef.current.sendRealtimeInput({
+            try {
+              session.sendRealtimeInput({
                 audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
               });
               
-              const now = Date.now();
               if (now - lastSendTime > 2000) {
-                addLog(`Audio chunk sent (${base64Data.length} chars)`);
+                addLog(`audio chunk sent to Gemini (${base64Data.length} bytes)`);
                 lastSendTime = now;
               }
+            } catch (sendErr) {
+              addLog(`Send error: ${sendErr}`);
             }
           } else {
             silenceFrames++;
@@ -346,6 +359,8 @@ export default function VoiceScreen({ navigation }: any) {
               setIsDavidThinking(true);
             }
           }
+        } else if (session && isDavidSpeaking) {
+          // David is speaking, we don't send audio to prevent echo
         }
       };
 
@@ -601,7 +616,7 @@ export default function VoiceScreen({ navigation }: any) {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.outerContainer} contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Sparkles color="#4F46E5" size={24} />
         <Text style={styles.title}>Voice with David</Text>
@@ -725,17 +740,21 @@ export default function VoiceScreen({ navigation }: any) {
       <Text style={styles.disclaimer}>
         David is an AI spiritual companion. For professional guidance or pastoral care, please consult your local church or a qualified advisor.
       </Text>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  outerContainer: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  container: {
+    minHeight: '100%',
     alignItems: 'center',
     paddingTop: 80,
     paddingHorizontal: 30,
+    paddingBottom: 40,
   },
   header: {
     alignItems: 'center',
@@ -913,16 +932,14 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   debugPanel: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 250,
-    backgroundColor: 'rgba(0, 0, 0, 0.95)',
-    padding: 10,
-    borderTopWidth: 2,
-    borderTopColor: '#d4af37',
-    zIndex: 1000,
+    width: '100%',
+    maxHeight: 200,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.3)',
   },
   debugHeader: {
     flexDirection: 'row',
