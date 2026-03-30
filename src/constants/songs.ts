@@ -7,6 +7,7 @@ export interface Song {
   genre: string;
   coverUrl: string;
   searchableKeywords: string[];
+  isAvailable?: boolean;
 }
 
 export const WORSHIP_SONGS: Song[] = [
@@ -15,21 +16,23 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'rb1',
     title: 'Love Theory',
     artist: 'Kirk Franklin',
-    url: 'https://cdn.pixabay.com/audio/2022/10/14/audio_9939716c1d.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', // Reliable sample
     moods: ['GRATEFUL', 'HOPEFUL', 'JOYFUL'],
     genre: 'R&B Gospel',
     coverUrl: 'https://picsum.photos/seed/lovetheory/300/300',
-    searchableKeywords: ['kirk franklin', 'love theory', 'joy', 'upbeat', 'r&b']
+    searchableKeywords: ['kirk franklin', 'love theory', 'joy', 'upbeat', 'r&b'],
+    isAvailable: true
   },
   {
     id: 'rb2',
     title: 'Take Me to the King',
     artist: 'Tamela Mann',
-    url: 'https://cdn.pixabay.com/audio/2022/01/18/audio_d0a13f69d2.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', // Reliable sample
     moods: ['OVERWHELMED', 'SAD', 'STRESSED'],
     genre: 'R&B Gospel',
     coverUrl: 'https://picsum.photos/seed/king/300/300',
-    searchableKeywords: ['tamela mann', 'king', 'heavy', 'surrender', 'r&b']
+    searchableKeywords: ['tamela mann', 'king', 'heavy', 'surrender', 'r&b'],
+    isAvailable: true
   },
   {
     id: 'rb3',
@@ -39,7 +42,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['ANXIOUS', 'SAD', 'STRESSED'],
     genre: 'R&B Gospel',
     coverUrl: 'https://picsum.photos/seed/cycles/300/300',
-    searchableKeywords: ['jonathan mcreynolds', 'cycles', 'breaking', 'peace', 'r&b']
+    searchableKeywords: ['jonathan mcreynolds', 'cycles', 'breaking', 'peace', 'r&b'],
+    isAvailable: false
   },
   {
     id: 'rb4',
@@ -49,7 +53,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['GRATEFUL', 'JOYFUL', 'HOPEFUL'],
     genre: 'R&B Gospel',
     coverUrl: 'https://picsum.photos/seed/shackles/300/300',
-    searchableKeywords: ['mary mary', 'shackles', 'praise', 'freedom', 'r&b']
+    searchableKeywords: ['mary mary', 'shackles', 'praise', 'freedom', 'r&b'],
+    isAvailable: false
   },
 
   // Contemporary Gospel
@@ -57,11 +62,12 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'cont1',
     title: 'Jireh',
     artist: 'Maverick City Music',
-    url: 'https://cdn.pixabay.com/audio/2022/01/18/audio_d0a13f69d2.mp3', 
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', // Reliable sample
     moods: ['HOPEFUL', 'GRATEFUL', 'OVERWHELMED', 'PEACEFUL'],
     genre: 'Contemporary Gospel',
     coverUrl: 'https://picsum.photos/seed/jireh/300/300',
-    searchableKeywords: ['maverick city', 'jireh', 'enough', 'provision', 'contemporary']
+    searchableKeywords: ['maverick city', 'jireh', 'enough', 'provision', 'contemporary'],
+    isAvailable: true
   },
   {
     id: 'cont2',
@@ -71,7 +77,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['HOPEFUL', 'OVERWHELMED', 'ANGRY'],
     genre: 'Contemporary Gospel',
     coverUrl: 'https://picsum.photos/seed/chain/300/300',
-    searchableKeywords: ['tasha cobbs', 'break', 'chain', 'power', 'contemporary']
+    searchableKeywords: ['tasha cobbs', 'break', 'chain', 'power', 'contemporary'],
+    isAvailable: false
   },
   {
     id: 'cont3',
@@ -81,7 +88,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['HOPEFUL', 'CONFUSED', 'STRESSED'],
     genre: 'Contemporary Gospel',
     coverUrl: 'https://picsum.photos/seed/intentional/300/300',
-    searchableKeywords: ['travis greene', 'intentional', 'working', 'trust', 'contemporary']
+    searchableKeywords: ['travis greene', 'intentional', 'working', 'trust', 'contemporary'],
+    isAvailable: false
   },
 
   // Traditional Gospel
@@ -89,11 +97,12 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'trad1',
     title: 'Amazing Grace',
     artist: 'Mahalia Jackson',
-    url: 'https://cdn.pixabay.com/audio/2021/11/25/audio_91b32e02f9.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', // Reliable sample
     moods: ['PEACEFUL', 'GRATEFUL', 'SAD'],
     genre: 'Traditional Gospel',
     coverUrl: 'https://picsum.photos/seed/grace/300/300',
-    searchableKeywords: ['mahalia jackson', 'amazing grace', 'hymn', 'classic', 'traditional']
+    searchableKeywords: ['mahalia jackson', 'amazing grace', 'hymn', 'classic', 'traditional'],
+    isAvailable: true
   },
   {
     id: 'trad2',
@@ -103,7 +112,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['JOYFUL', 'GRATEFUL'],
     genre: 'Traditional Gospel',
     coverUrl: 'https://picsum.photos/seed/happyday/300/300',
-    searchableKeywords: ['edwin hawkins', 'happy day', 'classic', 'traditional']
+    searchableKeywords: ['edwin hawkins', 'happy day', 'classic', 'traditional'],
+    isAvailable: false
   },
 
   // Worship / Praise
@@ -111,11 +121,12 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'wp1',
     title: 'Believe For It',
     artist: 'CeCe Winans',
-    url: 'https://cdn.pixabay.com/audio/2022/03/15/audio_783ed5a0f0.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3', // Reliable sample
     moods: ['HOPEFUL', 'ANXIOUS', 'OVERWHELMED'],
     genre: 'Worship / Praise',
     coverUrl: 'https://picsum.photos/seed/believe/300/300',
-    searchableKeywords: ['cece winans', 'believe', 'miracle', 'worship']
+    searchableKeywords: ['cece winans', 'believe', 'miracle', 'worship'],
+    isAvailable: true
   },
   {
     id: 'wp2',
@@ -125,7 +136,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['GRATEFUL', 'HOPEFUL', 'PEACEFUL'],
     genre: 'Worship / Praise',
     coverUrl: 'https://picsum.photos/seed/goodness/300/300',
-    searchableKeywords: ['cece winans', 'goodness', 'faithful', 'worship']
+    searchableKeywords: ['cece winans', 'goodness', 'faithful', 'worship'],
+    isAvailable: false
   },
   {
     id: 'wp3',
@@ -135,7 +147,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['CONFUSED', 'LONELY', 'HOPEFUL', 'PEACEFUL'],
     genre: 'Worship / Praise',
     coverUrl: 'https://picsum.photos/seed/waymaker/300/300',
-    searchableKeywords: ['sinach', 'way maker', 'miracle worker', 'worship']
+    searchableKeywords: ['sinach', 'way maker', 'miracle worker', 'worship'],
+    isAvailable: false
   },
 
   // Country Gospel
@@ -143,11 +156,12 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'cg1',
     title: 'Something in the Water',
     artist: 'Carrie Underwood',
-    url: 'https://cdn.pixabay.com/audio/2021/11/25/audio_91b32e02f9.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3', // Reliable sample
     moods: ['HOPEFUL', 'GRATEFUL', 'JOYFUL'],
     genre: 'Country Gospel',
     coverUrl: 'https://picsum.photos/seed/water/300/300',
-    searchableKeywords: ['carrie underwood', 'water', 'baptism', 'country']
+    searchableKeywords: ['carrie underwood', 'water', 'baptism', 'country'],
+    isAvailable: true
   },
   {
     id: 'cg2',
@@ -157,7 +171,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['GRATEFUL', 'HOPEFUL', 'JOYFUL'],
     genre: 'Country Gospel',
     coverUrl: 'https://picsum.photos/seed/choir/300/300',
-    searchableKeywords: ['zach williams', 'choir', 'joy', 'country']
+    searchableKeywords: ['zach williams', 'choir', 'joy', 'country'],
+    isAvailable: false
   },
 
   // Pop Gospel
@@ -165,11 +180,12 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'pg1',
     title: 'You Say',
     artist: 'Lauren Daigle',
-    url: 'https://cdn.pixabay.com/audio/2021/08/09/audio_8816222b4d.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3', // Reliable sample
     moods: ['LONELY', 'ANXIOUS', 'CONFUSED'],
     genre: 'Pop Gospel',
     coverUrl: 'https://picsum.photos/seed/yousay/300/300',
-    searchableKeywords: ['lauren daigle', 'you say', 'identity', 'pop']
+    searchableKeywords: ['lauren daigle', 'you say', 'identity', 'pop'],
+    isAvailable: true
   },
   {
     id: 'pg2',
@@ -179,7 +195,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['LONELY', 'SAD', 'OVERWHELMED'],
     genre: 'Pop Gospel',
     coverUrl: 'https://picsum.photos/seed/rescue/300/300',
-    searchableKeywords: ['lauren daigle', 'rescue', 'help', 'pop']
+    searchableKeywords: ['lauren daigle', 'rescue', 'help', 'pop'],
+    isAvailable: false
   },
 
   // Urban Gospel
@@ -187,11 +204,12 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'ug1',
     title: 'I\'ll Find You',
     artist: 'Lecrae ft. Tori Kelly',
-    url: 'https://cdn.pixabay.com/audio/2022/01/26/audio_d0c6b1330d.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', // Reliable sample
     moods: ['HOPEFUL', 'SAD', 'ANXIOUS'],
     genre: 'Urban Gospel',
     coverUrl: 'https://picsum.photos/seed/findyou/300/300',
-    searchableKeywords: ['lecrae', 'tori kelly', 'find you', 'hope', 'urban', 'rap']
+    searchableKeywords: ['lecrae', 'tori kelly', 'find you', 'hope', 'urban', 'rap'],
+    isAvailable: true
   },
   {
     id: 'ug2',
@@ -201,7 +219,8 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['GRATEFUL', 'JOYFUL'],
     genre: 'Urban Gospel',
     coverUrl: 'https://picsum.photos/seed/blessings/300/300',
-    searchableKeywords: ['lecrae', 'blessings', 'gratitude', 'urban', 'rap']
+    searchableKeywords: ['lecrae', 'blessings', 'gratitude', 'urban', 'rap'],
+    isAvailable: false
   },
 
   // Choir Gospel
@@ -209,11 +228,12 @@ export const WORSHIP_SONGS: Song[] = [
     id: 'ch1',
     title: 'Every Praise',
     artist: 'Hezekiah Walker',
-    url: 'https://cdn.pixabay.com/audio/2022/05/17/audio_1997aed91f.mp3',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3', // Reliable sample
     moods: ['JOYFUL', 'GRATEFUL', 'HOPEFUL'],
     genre: 'Choir Gospel',
     coverUrl: 'https://picsum.photos/seed/everypraise/300/300',
-    searchableKeywords: ['hezekiah walker', 'every praise', 'choir', 'unity']
+    searchableKeywords: ['hezekiah walker', 'every praise', 'choir', 'unity'],
+    isAvailable: true
   },
   {
     id: 'ch2',
@@ -223,6 +243,7 @@ export const WORSHIP_SONGS: Song[] = [
     moods: ['PEACEFUL', 'OVERWHELMED', 'GRATEFUL'],
     genre: 'Choir Gospel',
     coverUrl: 'https://picsum.photos/seed/totalpraise/300/300',
-    searchableKeywords: ['richard smallwood', 'total praise', 'choir', 'classic']
+    searchableKeywords: ['richard smallwood', 'total praise', 'choir', 'classic'],
+    isAvailable: false
   }
 ];

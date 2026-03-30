@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, TextInput, ActivityIndicator } from 'react-native';
 import { Music, Play, Heart, ChevronRight, Download, CheckCircle2, Search, X, Filter, Tag } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WORSHIP_SONGS, Song } from '../constants/songs';
-import { TextInput } from 'react-native';
 
 const MotionView = motion(View);
 import { MusicPlayer } from '../components/MusicPlayer';
@@ -27,6 +26,8 @@ export default function MusicScreen() {
   const [showDownloadsOnly, setShowDownloadsOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
+  const [isPlayerReady, setIsPlayerReady] = useState(false);
+  const [playerError, setPlayerError] = useState<string | null>(null);
   const [filteredSongs, setFilteredSongs] = useState<Song[]>(WORSHIP_SONGS);
   const [downloadedIds, setDownloadedIds] = useState<string[]>([]);
 
@@ -61,6 +62,10 @@ export default function MusicScreen() {
   }, [selectedMood, selectedGenres, showDownloadsOnly, downloadedIds, searchQuery]);
 
   const handlePlaySong = (song: Song) => {
+    if (currentSong?.id === song.id && isPlayerReady) return;
+    
+    setIsPlayerReady(false);
+    setPlayerError(null);
     setCurrentSong(song);
   };
 
@@ -261,29 +266,51 @@ export default function MusicScreen() {
                 transition={{ delay: index * 0.1 }}
               >
                 <TouchableOpacity 
-                  style={[styles.songItem, currentSong?.id === song.id && styles.songItemActive]}
-                  onPress={() => handlePlaySong(song)}
+                  style={[
+                    styles.songItem, 
+                    currentSong?.id === song.id && styles.songItemActive,
+                    song.isAvailable === false && styles.songItemDisabled
+                  ]}
+                  onPress={() => song.isAvailable !== false && handlePlaySong(song)}
+                  disabled={song.isAvailable === false}
                 >
-                  <Image source={{ uri: song.coverUrl }} style={styles.songCover} />
+                  <Image source={{ uri: song.coverUrl }} style={[styles.songCover, song.isAvailable === false && { opacity: 0.5 }]} />
                   <View style={styles.songDetails}>
-                    <Text style={styles.songTitle}>{song.title}</Text>
+                    <Text style={[styles.songTitle, song.isAvailable === false && { color: 'rgba(255, 255, 255, 0.4)' }]}>
+                      {song.title}
+                    </Text>
                     <Text style={styles.songArtist}>{song.artist}</Text>
+                    {song.isAvailable === false && (
+                      <Text style={styles.unavailableBadge}>COMING SOON</Text>
+                    )}
                   </View>
                   
                   <View style={styles.songActions}>
-                    <TouchableOpacity 
-                      style={styles.downloadButton}
-                      onPress={() => handleDownload(song.id)}
-                    >
-                      {downloadedIds.includes(song.id) ? (
-                         <CheckCircle2 size={18} color="#d4af37" />
-                      ) : (
-                        <Download size={18} color="rgba(212, 175, 55, 0.4)" />
-                      )}
-                    </TouchableOpacity>
+                    {song.isAvailable !== false && (
+                      <TouchableOpacity 
+                        style={styles.downloadButton}
+                        onPress={() => handleDownload(song.id)}
+                      >
+                        {downloadedIds.includes(song.id) ? (
+                           <CheckCircle2 size={18} color="#d4af37" />
+                        ) : (
+                          <Download size={18} color="rgba(212, 175, 55, 0.4)" />
+                        )}
+                      </TouchableOpacity>
+                    )}
                     
-                    <TouchableOpacity style={styles.playIconButton}>
-                      <Play size={16} color={currentSong?.id === song.id ? '#0b1e3d' : '#d4af37'} fill={currentSong?.id === song.id ? '#0b1e3d' : 'transparent'} />
+                    <TouchableOpacity 
+                      style={[
+                        styles.playIconButton, 
+                        song.isAvailable === false && { backgroundColor: 'transparent' }
+                      ]}
+                      disabled={song.isAvailable === false}
+                    >
+                      {song.isAvailable === false ? (
+                        <X size={16} color="rgba(212, 175, 55, 0.2)" />
+                      ) : (
+                        <Play size={16} color={currentSong?.id === song.id ? '#0b1e3d' : '#d4af37'} fill={currentSong?.id === song.id ? '#0b1e3d' : 'transparent'} />
+                      )}
                     </TouchableOpacity>
                   </View>
                 </TouchableOpacity>
@@ -295,11 +322,37 @@ export default function MusicScreen() {
 
       {currentSong && (
         <View style={styles.playerWrapper}>
-          <MusicPlayer 
-            song={currentSong} 
-            onNext={handleNext}
-            onPrev={handlePrev}
-          />
+          {!isPlayerReady && !playerError && (
+            <View style={styles.validatingContainer}>
+              <ActivityIndicator color="#d4af37" size="small" />
+              <Text style={styles.validatingText}>Validating audio source...</Text>
+            </View>
+          )}
+          
+          {playerError && (
+            <View style={styles.playerErrorContainer}>
+              <View style={styles.playerErrorInfo}>
+                <Text style={styles.playerErrorTitle}>{currentSong.title}</Text>
+                <Text style={styles.playerErrorText}>{playerError}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setCurrentSong(null)} style={styles.closeErrorButton}>
+                <X size={20} color="#ff4444" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={{ display: isPlayerReady ? 'flex' : 'none' }}>
+            <MusicPlayer 
+              song={currentSong} 
+              onNext={handleNext}
+              onPrev={handlePrev}
+              onReady={() => setIsPlayerReady(true)}
+              onError={(err) => {
+                setPlayerError(err);
+                setIsPlayerReady(false);
+              }}
+            />
+          </View>
         </View>
       )}
     </View>
@@ -449,6 +502,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(212, 175, 55, 0.15)',
     borderColor: 'rgba(212, 175, 55, 0.4)',
   },
+  songItemDisabled: {
+    opacity: 0.7,
+    backgroundColor: 'rgba(15, 42, 82, 0.2)',
+  },
   songCover: {
     width: 50,
     height: 50,
@@ -468,6 +525,14 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 12,
     marginTop: 2,
+  },
+  unavailableBadge: {
+    color: '#d4af37',
+    fontSize: 8,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    marginTop: 4,
+    opacity: 0.6,
   },
   songActions: {
     flexDirection: 'row',
@@ -491,6 +556,53 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     zIndex: 100,
+  },
+  validatingContainer: {
+    backgroundColor: 'rgba(15, 42, 82, 0.9)',
+    borderRadius: 24,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.2)',
+  },
+  validatingText: {
+    color: '#d4af37',
+    fontSize: 14,
+    fontFamily: 'Playfair Display',
+    fontStyle: 'italic',
+  },
+  playerErrorContainer: {
+    backgroundColor: 'rgba(15, 42, 82, 0.95)',
+    borderRadius: 24,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.4)',
+  },
+  playerErrorInfo: {
+    flex: 1,
+  },
+  playerErrorTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: 'Playfair Display',
+  },
+  playerErrorText: {
+    color: '#ff4444',
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: 'bold',
+  },
+  closeErrorButton: {
+    padding: 8,
+    backgroundColor: 'rgba(255, 68, 68, 0.1)',
+    borderRadius: 12,
   },
   emptyContainer: {
     padding: 40,
