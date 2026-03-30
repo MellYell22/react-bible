@@ -116,26 +116,48 @@ export default function VoiceScreen({ navigation }: any) {
       
       const VOICE_MODEL_PRIMARY = "gemini-2.5-flash-native-audio-preview-12-2025";
       const VOICE_MODEL_FALLBACK = "gemini-2.5-flash-native-audio-preview-09-2025";
-      const DAVID_VOICE = "Zephyr";
+      const DAVID_VOICE = "Charon"; // Deep, grounded male voice
 
       const connectWithModel = async (modelName: string) => {
         addLog(`Starting Live connection (${modelName})...`);
         return await ai.live.connect({
           model: modelName,
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: DAVID_VOICE,
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: DAVID_VOICE,
+                  },
                 },
               },
-            },
-            systemInstruction: "You are David, a warm, compassionate AI Bible companion. This is a real-time voice conversation. Respond naturally and warmly. Keep responses very concise (1-2 sentences). Focus on spiritual encouragement.",
-          } as any,
+              systemInstruction: `You are David, a warm, compassionate male AI Bible companion. You MUST speak in ENGLISH only. This is a real-time voice conversation. 
+
+IDENTITY:
+- You are reassuring, wise, and emotionally grounded.
+- You sound like a real person having a conversation, not a robot.
+- Use natural phrasing, empathy, and gentle pauses (e.g., "Hey... I hear you.", "That sounds really heavy.").
+- Speak TO the user, not AT them.
+
+RESPONSE STRUCTURE (MANDATORY):
+Every response MUST follow this structure:
+1. Empathy (1-2 sentences): Acknowledge the user's feelings with genuine warmth.
+2. Scripture: Provide at least one specific and relevant Bible verse.
+3. Simple Explanation: Briefly explain the verse in the context of the user's situation.
+4. Encouragement/Guidance: Offer specific, meaningful support.
+5. Optional Question: A gentle follow-up to keep the conversation going.
+
+RULES:
+- Do NOT use vague or generic filler like "you're not alone" or "it will be okay" without specific scripture and explanation.
+- Keep responses SHORT but MEANINGFUL (4-6 sentences total).
+- Prioritize responsiveness and speed. Start speaking as soon as you have a helpful thought.
+- Do not be overly dramatic or monotone.`,
+            } as any,
           callbacks: {
             onopen: () => {
               addLog(`live session connected with ${modelName}`);
+              addLog(`Selected voice: ${DAVID_VOICE} (Male)`);
+              addLog(`Forced language: English`);
               setIsConnected(true);
               setIsConnecting(false);
               startAudioCapture();
@@ -301,7 +323,7 @@ export default function VoiceScreen({ navigation }: any) {
 
       let silenceFrames = 0;
       const SILENCE_THRESHOLD = 0.001; // Very sensitive to ensure audio is sent
-      const SILENCE_LIMIT = 30; 
+      const SILENCE_LIMIT = 10; // Approx 0.6s at 16k rate with 1024 buffer
       let lastSendTime = 0;
 
       processor.onaudioprocess = (e) => {
