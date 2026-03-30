@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, FlatList } from 'react-native';
 import { motion } from 'motion/react';
 import { ChevronRight, ChevronLeft, BookOpen, Book } from 'lucide-react';
+
+const MotionView = motion(View);
 import { supabase } from '../services/supabase';
 import { Profile } from '../types';
 
@@ -109,7 +111,7 @@ export default function BibleBrowserScreen() {
         numColumns={5}
         keyExtractor={(item) => item.toString()}
         renderItem={({ item }) => (
-          <motion.div
+          <MotionView
             whileHover={{ scale: 1.05, backgroundColor: 'rgba(212, 175, 55, 0.1)' }}
             whileTap={{ scale: 0.95 }}
             style={{ flex: 1, margin: 6 }}
@@ -117,7 +119,7 @@ export default function BibleBrowserScreen() {
             <TouchableOpacity style={[styles.gridItem, { margin: 0 }]} onPress={() => handleChapterSelect(item)}>
               <Text style={styles.gridItemText}>{item}</Text>
             </TouchableOpacity>
-          </motion.div>
+          </MotionView>
         )}
         contentContainerStyle={styles.gridContent}
       />
@@ -133,7 +135,7 @@ export default function BibleBrowserScreen() {
         numColumns={6}
         keyExtractor={(item) => item.toString()}
         renderItem={({ item }) => (
-          <motion.div
+          <MotionView
             whileHover={{ scale: 1.05, backgroundColor: 'rgba(212, 175, 55, 0.1)' }}
             whileTap={{ scale: 0.95 }}
             style={{ flex: 1, margin: 4 }}
@@ -141,7 +143,7 @@ export default function BibleBrowserScreen() {
             <TouchableOpacity style={[styles.gridItemSmall, { margin: 0 }]} onPress={() => handleVerseSelect(item)}>
               <Text style={styles.gridItemTextSmall}>{item}</Text>
             </TouchableOpacity>
-          </motion.div>
+          </MotionView>
         )}
         contentContainerStyle={styles.gridContent}
       />

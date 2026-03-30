@@ -2,11 +2,15 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Image } from 'react-native';
 import { motion } from 'motion/react';
 import { getMoodScriptures, generateSpeech } from '../services/gemini';
+
+const MotionView = motion(View);
 import { MoodResponse } from '../types';
 import { Sparkles, Search, Volume2, Music, Play, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Cloud, X } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { Profile } from '../types';
+import { MOODS_DATA, MoodData } from '../constants/moods';
 import { WORSHIP_SONGS, Song } from '../constants/songs';
+import { MessageCircle } from 'lucide-react';
 import { MusicPlayer } from '../components/MusicPlayer';
 
 type ReadingMode = 'sanctuary' | 'parchment' | 'midnight';
@@ -49,14 +53,16 @@ const FONT_SIZES = {
 };
 
 const MOOD_CONFIG = [
-  { key: 'SAD', label: 'Sad', icon: Frown },
   { key: 'ANXIOUS', label: 'Anxious', icon: Wind },
+  { key: 'SAD', label: 'Sad', icon: Frown },
   { key: 'LONELY', label: 'Lonely', icon: User },
+  { key: 'STRESSED', label: 'Stressed', icon: Wind },
+  { key: 'OVERWHELMED', label: 'Overwhelmed', icon: Layers },
+  { key: 'HOPEFUL', label: 'Hopeful', icon: Sun },
   { key: 'GRATEFUL', label: 'Grateful', icon: Heart },
   { key: 'ANGRY', label: 'Angry', icon: Flame },
-  { key: 'HOPEFUL', label: 'Hopeful', icon: Sun },
   { key: 'CONFUSED', label: 'Confused', icon: HelpCircle },
-  { key: 'OVERWHELMED', label: 'Overwhelmed', icon: Layers },
+  { key: 'JOYFUL', label: 'Joyful', icon: Sun },
   { key: 'PEACEFUL', label: 'Peaceful', icon: Cloud },
 ];
 
@@ -92,6 +98,18 @@ export default function MoodScreen({ route, navigation }: any) {
   }, [route?.params?.mood]);
 
   const handleInitialSearch = async (initialMood: string) => {
+    // Check if it's a predefined mood
+    const staticMood = MOODS_DATA.find(m => m.key === initialMood.toUpperCase());
+    
+    if (staticMood) {
+      setResult({
+        scriptures: staticMood.scriptures.map(s => ({ ...s, explanation: 'Reflecting on God\'s word for your heart today.' })),
+        encouragement: `I see you're feeling ${staticMood.label.toLowerCase()}. Remember that God is with you in every emotion.`
+      });
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       // We need the profile for translation, but it might not be loaded yet
@@ -129,6 +147,19 @@ export default function MoodScreen({ route, navigation }: any) {
   const handleSearch = async () => {
     const query = searchQuery || mood;
     if (!query) return;
+
+    // Check if it's a predefined mood
+    const staticMood = MOODS_DATA.find(m => m.label.toLowerCase() === query.toLowerCase() || m.key === query.toUpperCase());
+    if (staticMood) {
+      setMood(staticMood.key);
+      setResult({
+        scriptures: staticMood.scriptures.map(s => ({ ...s, explanation: 'Reflecting on God\'s word for your heart today.' })),
+        encouragement: `I see you're feeling ${staticMood.label.toLowerCase()}. Remember that God is with you in every emotion.`
+      });
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setMood(query);
     setTestamentFilter('all');
@@ -227,7 +258,7 @@ export default function MoodScreen({ route, navigation }: any) {
 
           <View style={styles.moodPills}>
             {MOOD_CONFIG.map((m) => (
-              <motion.div
+              <MotionView
                 key={m.key}
                 whileHover={{ scale: 1.02, backgroundColor: 'rgba(212, 175, 55, 0.05)' }}
                 whileTap={{ scale: 0.98 }}
@@ -252,7 +283,7 @@ export default function MoodScreen({ route, navigation }: any) {
                   <m.icon size={18} color={mood === m.key ? theme.accent : theme.muted} style={{ marginBottom: 6 }} />
                   <Text style={[styles.moodPillText, { color: mood === m.key ? theme.accent : theme.text }]}>{m.label}</Text>
                 </TouchableOpacity>
-              </motion.div>
+              </MotionView>
             ))}
           </View>
         </View>
@@ -276,18 +307,32 @@ export default function MoodScreen({ route, navigation }: any) {
           <View style={styles.resultContainer}>
             <View style={[styles.encouragementCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <Sparkles color={theme.accent} size={20} />
-                <TouchableOpacity onPress={speakEncouragement} disabled={isSpeaking}>
-                  {isSpeaking ? (
-                    <ActivityIndicator size="small" color={theme.accent} />
-                  ) : (
-                    <Volume2 color={theme.accent} size={20} />
-                  )}
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Sparkles color={theme.accent} size={20} />
+                  <Text style={{ color: theme.accent, fontSize: 10, fontWeight: 'bold', letterSpacing: 1 }}>DAVID'S GUIDANCE</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 15 }}>
+                  <TouchableOpacity onPress={speakEncouragement} disabled={isSpeaking}>
+                    {isSpeaking ? (
+                      <ActivityIndicator size="small" color={theme.accent} />
+                    ) : (
+                      <Volume2 color={theme.accent} size={20} />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => navigation.navigate('Voice', { mood: mood })}>
+                    <MessageCircle color={theme.accent} size={20} />
+                  </TouchableOpacity>
+                </View>
               </View>
               <Text style={[styles.encouragementText, { color: theme.text, fontSize: fonts.verse - 2, fontFamily: 'Playfair Display' }]}>
                 {result.encouragement}
               </Text>
+              <TouchableOpacity 
+                style={[styles.chatButton, { borderColor: theme.accent }]}
+                onPress={() => navigation.navigate('Voice', { mood: mood })}
+              >
+                <Text style={[styles.chatButtonText, { color: theme.accent }]}>CONTINUE WITH DAVID</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Mood-based Worship Recommendations */}
@@ -618,6 +663,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontStyle: 'italic',
     textAlign: 'center',
+  },
+  chatButton: {
+    marginTop: 15,
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignSelf: 'center',
+  },
+  chatButtonText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    letterSpacing: 1,
   },
   musicSection: {
     marginBottom: 25,

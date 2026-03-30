@@ -3,12 +3,18 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Pla
 import { Mic, MicOff, Lock, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from "motion/react";
 import { supabase } from '../services/supabase';
+
+const MotionView = motion(View);
 import { Profile } from '../types';
 import { GoogleGenAI, Modality, StartSensitivity, EndSensitivity } from "@google/genai";
 import { hasProAccess } from '../utils/tier';
 
-export default function VoiceScreen({ navigation }: any) {
+import { MOODS_DATA } from '../constants/moods';
+import { WORSHIP_SONGS } from '../constants/songs';
+
+export default function VoiceScreen({ route, navigation }: any) {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const moodParam = route?.params?.mood;
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -20,8 +26,11 @@ export default function VoiceScreen({ navigation }: any) {
   const [showDebug, setShowDebug] = useState(false);
   const [lastResponseText, setLastResponseText] = useState<string | null>(null);
   const [isDavidProcessing, setIsDavidProcessing] = useState(false);
+  const [messages, setMessages] = useState<{ role: 'user' | 'david', text: string }[]>([]);
+  const [currentDavidResponse, setCurrentDavidResponse] = useState("");
   
   const sessionRef = useRef<any>(null);
+  const davidResponseRef = useRef("");
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const audioQueue = useRef<string[]>([]);
@@ -75,6 +84,7 @@ export default function VoiceScreen({ navigation }: any) {
   };
 
   const startSession = async () => {
+    stopSession(); // Ensure clean state before starting
     // CRITICAL: Initialize and resume AudioContext immediately on user gesture
     const context = getAudioContext(16000);
     if (context.state === 'suspended') {
@@ -92,7 +102,14 @@ export default function VoiceScreen({ navigation }: any) {
     }
 
     setIsConnecting(true);
+    setMessages([]);
+    setCurrentDavidResponse("");
+    davidResponseRef.current = "";
     setError(null);
+    setLastResponseText(null);
+    setIsDavidProcessing(false);
+    setIsDavidThinking(false);
+    setIsDavidSpeaking(false);
     addLog("Starting session...");
     try {
       const apiKey = 
@@ -120,6 +137,22 @@ export default function VoiceScreen({ navigation }: any) {
 
       const connectWithModel = async (modelName: string) => {
         addLog(`Starting Live connection (${modelName})...`);
+        
+        // Get mood context if available
+        let moodContext = "";
+        if (moodParam) {
+          const staticMood = MOODS_DATA.find(m => m.key === moodParam.toUpperCase());
+          if (staticMood) {
+            const moodSongs = WORSHIP_SONGS.filter(s => s.moods.includes(staticMood.key)).slice(0, 2);
+            moodContext = `
+CONTEXT: The user is currently feeling ${staticMood.label}. 
+RELEVANT SCRIPTURES: ${staticMood.scriptures.map(s => `${s.reference}: "${s.verse}"`).join('; ')}
+RECOMMENDED SONGS: ${moodSongs.map(s => `"${s.title}" by ${s.artist}`).join(', ')}
+
+When you start the conversation, acknowledge this feeling warmly. Reference one of these scriptures or songs naturally if it fits the flow. Don't force it.`;
+          }
+        }
+
         return await ai.live.connect({
           model: modelName,
             config: {
@@ -133,25 +166,32 @@ export default function VoiceScreen({ navigation }: any) {
               },
               systemInstruction: `You are David, a warm, compassionate male AI Bible companion. You MUST speak in ENGLISH only. This is a real-time voice conversation. 
 
+${moodContext}
+
 IDENTITY:
 - You are reassuring, wise, and emotionally grounded.
 - You sound like a real person having a conversation, not a robot.
-- Use natural phrasing, empathy, and gentle pauses (e.g., "Hey... I hear you.", "That sounds really heavy.").
+- Use natural phrasing, empathy, and gentle pauses.
 - Speak TO the user, not AT them.
 
-RESPONSE STRUCTURE (MANDATORY):
-Every response MUST follow this structure:
-1. Empathy (1-2 sentences): Acknowledge the user's feelings with genuine warmth.
-2. Scripture: Provide at least one specific and relevant Bible verse.
-3. Simple Explanation: Briefly explain the verse in the context of the user's situation.
-4. Encouragement/Guidance: Offer specific, meaningful support.
-5. Optional Question: A gentle follow-up to keep the conversation going.
+MUSIC RECOMMENDATIONS:
+- You have access to a library of Gospel music across multiple genres (R&B, Contemporary, Traditional, Worship, Country, Pop, Urban, Choir).
+- If a user expresses a mood, you can naturally suggest a song from the RECOMMENDED SONGS list provided in the context.
+- Example: "That's a lot to carry... you might like 'Take Me to the King' — it really helps when everything feels heavy. Do you want me to play it?"
+- Do NOT force recommendations. Only suggest if it feels helpful and natural.
+- Do NOT list songs like a robot.
 
-RULES:
-- Do NOT use vague or generic filler like "you're not alone" or "it will be okay" without specific scripture and explanation.
-- Keep responses SHORT but MEANINGFUL (4-6 sentences total).
-- Prioritize responsiveness and speed. Start speaking as soon as you have a helpful thought.
-- Do not be overly dramatic or monotone.`,
+CONCISENESS (STRICT RULE):
+- Keep your responses VERY SHORT (1-2 sentences maximum).
+- Do NOT provide long explanations or multiple scriptures unless explicitly asked.
+- Prioritize speed and natural conversation flow.
+
+NO META-TALK (STRICT RULE):
+- NEVER describe what you are doing (e.g., "I am thinking", "Formulating response", "Crafting a message").
+- NEVER use internal labels, planning steps, or reasoning in your output.
+- ONLY output the final words you want to speak.
+
+If a mood context is provided above, use it to inform your initial greeting warmly and briefly.`,
             } as any,
           callbacks: {
             onopen: () => {
@@ -185,11 +225,23 @@ RULES:
                 // Standard path
                 if (message.serverContent?.modelTurn?.parts) {
                   for (const part of message.serverContent.modelTurn.parts) {
+                    // CRITICAL: Skip thinking/reasoning parts
+                    if ((part as any).thought) {
+                      addLog("Skipping internal thought part");
+                      continue;
+                    }
+                    
                     if (part.inlineData?.data) {
                       audioData = part.inlineData.data;
                     }
                     if (part.text) {
-                      textData = part.text;
+                      // Final safety filter for meta-talk
+                      const isMetaTalk = /^(formulating|offering|crafting|thinking|reasoning|processing)/i.test(part.text.trim());
+                      if (!isMetaTalk) {
+                        textData = part.text;
+                      } else {
+                        addLog(`Filtered meta-talk: "${part.text.trim()}"`);
+                      }
                     }
                   }
                 }
@@ -213,13 +265,24 @@ RULES:
 
                 if (textData) {
                   addLog(`text response received: "${textData}"`);
-                  setLastResponseText(textData);
+                  davidResponseRef.current += textData;
+                  setCurrentDavidResponse(davidResponseRef.current);
+                }
+
+                if (message.serverContent?.modelTurn?.complete) {
+                  addLog("Model turn complete");
+                  if (davidResponseRef.current) {
+                    setMessages(prev => [...prev, { role: 'david', text: davidResponseRef.current }]);
+                    davidResponseRef.current = "";
+                    setCurrentDavidResponse("");
+                  }
                 }
 
                 if (message.serverContent?.userTurn) {
                   const userText = message.serverContent.userTurn.parts?.[0]?.text;
                   if (userText) {
                     addLog(`transcript received: "${userText}"`);
+                    setMessages(prev => [...prev, { role: 'user', text: userText }]);
                     setIsDavidProcessing(true);
                   }
                 }
@@ -441,7 +504,7 @@ RULES:
     
     const context = getAudioContext(24000); // Gemini output is usually 24kHz
     if (nextStartTimeRef.current < context.currentTime) {
-      nextStartTimeRef.current = context.currentTime + 0.1;
+      nextStartTimeRef.current = context.currentTime + 0.05; // Reduced delay for faster start
     }
     
     try {
@@ -643,12 +706,25 @@ RULES:
         <Sparkles color="#4F46E5" size={24} />
         <Text style={styles.title}>Voice with David</Text>
         <Text style={styles.subtitle}>Real-time Spiritual Companion</Text>
+        
+        <View style={styles.connectionIndicator}>
+          <View style={[
+            styles.statusDot, 
+            isConnecting ? styles.dotConnecting : isConnected ? styles.dotConnected : styles.dotDisconnected
+          ]} />
+          <Text style={[
+            styles.connectionText,
+            isConnecting ? styles.textConnecting : isConnected ? styles.textConnected : styles.textDisconnected
+          ]}>
+            {isConnecting ? "Connecting" : isConnected ? "Connected" : "Disconnected"}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.visualizerContainer}>
         <AnimatePresence>
           {isConnected && (
-            <motion.div
+            <MotionView
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ 
                 scale: isDavidSpeaking ? [1, 1.3, 1] : isListening ? [1, 1.1, 1] : 1,
@@ -663,9 +739,8 @@ RULES:
                 position: 'absolute',
                 width: 180,
                 height: 180,
-                borderRadius: '50%',
-                backgroundColor: '#d4af37',
-                filter: 'blur(20px)',
+                borderRadius: 90,
+                backgroundColor: 'rgba(212, 175, 55, 0.3)',
                 zIndex: 1,
               }}
             />
@@ -675,12 +750,12 @@ RULES:
         <View style={[styles.mainCircle, isConnected && styles.mainActive]}>
           {isConnected ? (
             isDavidSpeaking ? (
-              <motion.div
+              <MotionView
                 animate={{ scale: [1, 1.1, 1] }}
                 transition={{ duration: 0.5, repeat: Infinity }}
               >
                 <Sparkles color="#d4af37" size={48} />
-              </motion.div>
+              </MotionView>
             ) : (
               <Mic color="#fff" size={48} />
             )
@@ -692,19 +767,47 @@ RULES:
 
       <View style={styles.statusContainer}>
         <Text style={styles.statusText}>
-          {isConnecting ? "Connecting..." : isDavidSpeaking ? "David is speaking..." : isDavidProcessing ? "David is processing..." : isDavidThinking ? "David is thinking..." : isConnected ? "David is listening..." : "Tap to start conversation"}
+          {isConnecting ? "Connecting..." : isDavidSpeaking ? "David is speaking..." : (isDavidProcessing || isDavidThinking) ? "David is typing..." : isConnected ? "David is listening..." : "Tap to start conversation"}
         </Text>
       </View>
 
-      {lastResponseText && isConnected && (
-        <motion.div 
+      {isConnected && (
+        <View style={styles.chatContainer}>
+          <ScrollView 
+            style={styles.chatScroll} 
+            contentContainerStyle={styles.chatContent}
+            ref={(ref) => {
+              if (ref) {
+                // Auto-scroll to bottom
+                (ref as any).scrollToEnd({ animated: true });
+              }
+            }}
+          >
+            {messages.map((msg, i) => (
+              <View key={i} style={[styles.messageBubble, msg.role === 'user' ? styles.userBubble : styles.davidBubble]}>
+                <Text style={styles.messageLabel}>{msg.role === 'user' ? 'You' : 'David'}:</Text>
+                <Text style={styles.messageText}>{msg.text}</Text>
+              </View>
+            ))}
+            {currentDavidResponse && (
+              <View style={[styles.messageBubble, styles.davidBubble]}>
+                <Text style={styles.messageLabel}>David:</Text>
+                <Text style={styles.messageText}>{currentDavidResponse}</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      )}
+
+      {lastResponseText && isConnected && !messages.length && !currentDavidResponse && (
+        <MotionView 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           style={styles.textFallbackContainer}
         >
           <Text style={styles.textFallbackLabel}>David says:</Text>
           <Text style={styles.textFallbackContent}>{lastResponseText}</Text>
-        </motion.div>
+        </MotionView>
       )}
 
       {error && (
@@ -796,6 +899,55 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  connectionIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.2)',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  dotConnected: {
+    backgroundColor: '#4ade80',
+    shadowColor: '#4ade80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+  },
+  dotConnecting: {
+    backgroundColor: '#f5d77a',
+    shadowColor: '#f5d77a',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+  },
+  dotDisconnected: {
+    backgroundColor: '#9CA3AF',
+  },
+  connectionText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  textConnected: {
+    color: '#4ade80',
+  },
+  textConnecting: {
+    color: '#f5d77a',
+  },
+  textDisconnected: {
+    color: '#9CA3AF',
   },
   visualizerContainer: {
     width: 200,
@@ -893,6 +1045,53 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  chatContainer: {
+    width: '100%',
+    height: 200,
+    backgroundColor: 'rgba(15, 42, 82, 0.4)',
+    borderRadius: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.2)',
+    overflow: 'hidden',
+  },
+  chatScroll: {
+    flex: 1,
+  },
+  chatContent: {
+    padding: 12,
+  },
+  messageBubble: {
+    marginBottom: 12,
+    padding: 10,
+    borderRadius: 12,
+    maxWidth: '90%',
+  },
+  userBubble: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(212, 175, 55, 0.15)',
+    borderBottomRightRadius: 2,
+  },
+  davidBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(15, 42, 82, 0.8)',
+    borderBottomLeftRadius: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.3)',
+  },
+  messageLabel: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#d4af37',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    letterSpacing: 1,
+  },
+  messageText: {
+    color: '#fff',
+    fontSize: 13,
+    lineHeight: 18,
   },
   testButton: {
     marginTop: 15,

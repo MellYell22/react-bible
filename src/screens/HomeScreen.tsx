@@ -2,21 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, TextInput } from 'react-native';
 import { motion } from 'motion/react';
 import { supabase } from '../services/supabase';
+
+const MotionView = motion(View);
 import { Profile } from '../types';
-import { Search, Globe, Sparkles, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Cloud } from 'lucide-react';
+import { Search, Globe, Sparkles, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Zap } from 'lucide-react';
 import { OWNER_EMAIL } from '../utils/tier';
 import { getVerseReflection } from '../services/gemini';
 
 const MOOD_CONFIG = [
-  { key: 'SAD', label: 'Sad', icon: Frown },
   { key: 'ANXIOUS', label: 'Anxious', icon: Wind },
+  { key: 'SAD', label: 'Sad', icon: Frown },
   { key: 'LONELY', label: 'Lonely', icon: User },
+  { key: 'STRESSED', label: 'Stressed', icon: Zap },
+  { key: 'OVERWHELMED', label: 'Overwhelmed', icon: Layers },
+  { key: 'HOPEFUL', label: 'Hopeful', icon: Sun },
   { key: 'GRATEFUL', label: 'Grateful', icon: Heart },
   { key: 'ANGRY', label: 'Angry', icon: Flame },
-  { key: 'HOPEFUL', label: 'Hopeful', icon: Sun },
   { key: 'CONFUSED', label: 'Confused', icon: HelpCircle },
-  { key: 'OVERWHELMED', label: 'Overwhelmed', icon: Layers },
-  { key: 'PEACEFUL', label: 'Peaceful', icon: Cloud },
 ];
 const TRANSLATIONS = ['NIV', 'KJV', 'NLT', 'ESV', 'NKJV', 'CSB'];
 
@@ -143,7 +145,7 @@ export default function HomeScreen({ navigation }: any) {
 
           <View style={styles.moodPills}>
             {MOOD_CONFIG.map((m) => (
-              <motion.div
+              <MotionView
                 key={m.key}
                 whileHover={{ scale: 1.02, backgroundColor: 'rgba(212, 175, 55, 0.05)' }}
                 whileTap={{ scale: 0.98 }}
@@ -156,7 +158,7 @@ export default function HomeScreen({ navigation }: any) {
                   <m.icon size={16} color="#d4af37" style={{ marginBottom: 4 }} />
                   <Text style={styles.moodPillText}>{m.label}</Text>
                 </TouchableOpacity>
-              </motion.div>
+              </MotionView>
             ))}
           </View>
         </View>
@@ -172,7 +174,7 @@ export default function HomeScreen({ navigation }: any) {
           <Text style={styles.verseReference}>— PSALM 91:1</Text>
           
           {reflection ? (
-            <motion.div
+            <MotionView
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               style={{ width: '100%' }}
@@ -187,7 +189,7 @@ export default function HomeScreen({ navigation }: any) {
                   <Text style={styles.closeReflectionText}>CLOSE</Text>
                 </TouchableOpacity>
               </View>
-            </motion.div>
+            </MotionView>
           ) : (
             <TouchableOpacity 
               style={styles.reflectionButton} 

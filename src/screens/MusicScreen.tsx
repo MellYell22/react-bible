@@ -1,18 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform } from 'react-native';
-import { Music, Play, Heart, ChevronRight, Download, CheckCircle2 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Music, Play, Heart, ChevronRight, Download, CheckCircle2, Search, X, Filter, Tag } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { WORSHIP_SONGS, Song } from '../constants/songs';
+import { TextInput } from 'react-native';
+
+const MotionView = motion(View);
 import { MusicPlayer } from '../components/MusicPlayer';
 import { getDownloadedSongs, toggleDownload, isSongDownloaded } from '../services/storage';
 
-const MOODS = ['SAD', 'ANXIOUS', 'LONELY', 'GRATEFUL', 'ANGRY', 'HOPEFUL'];
-const GENRES = ['Pop Gospel', 'R&B Gospel', 'Country Gospel', 'Worship / Praise'];
+const MOODS = ['ANXIOUS', 'SAD', 'LONELY', 'STRESSED', 'OVERWHELMED', 'HOPEFUL', 'GRATEFUL', 'ANGRY', 'CONFUSED', 'JOYFUL', 'PEACEFUL'];
+const GENRES = [
+  'R&B Gospel',
+  'Contemporary Gospel',
+  'Traditional Gospel',
+  'Worship / Praise',
+  'Country Gospel',
+  'Pop Gospel',
+  'Urban Gospel',
+  'Choir Gospel'
+];
 
 export default function MusicScreen() {
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
   const [showDownloadsOnly, setShowDownloadsOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [filteredSongs, setFilteredSongs] = useState<Song[]>(WORSHIP_SONGS);
   const [downloadedIds, setDownloadedIds] = useState<string[]>([]);
@@ -23,6 +36,18 @@ export default function MusicScreen() {
 
   useEffect(() => {
     let filtered = WORSHIP_SONGS;
+    
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(s => 
+        s.title.toLowerCase().includes(query) || 
+        s.artist.toLowerCase().includes(query) ||
+        s.genre.toLowerCase().includes(query) ||
+        s.moods.some(m => m.toLowerCase().includes(query)) ||
+        s.searchableKeywords.some(k => k.toLowerCase().includes(query))
+      );
+    }
+
     if (showDownloadsOnly) {
       filtered = filtered.filter(s => downloadedIds.includes(s.id));
     }
@@ -33,7 +58,7 @@ export default function MusicScreen() {
       filtered = filtered.filter(s => s.genre === selectedGenre);
     }
     setFilteredSongs(filtered);
-  }, [selectedMood, selectedGenre, showDownloadsOnly, downloadedIds]);
+  }, [selectedMood, selectedGenre, showDownloadsOnly, downloadedIds, searchQuery]);
 
   const handlePlaySong = (song: Song) => {
     setCurrentSong(song);
@@ -66,6 +91,90 @@ export default function MusicScreen() {
           <Text style={styles.title}>Gospel Music</Text>
           <Text style={styles.subtitle}>Modern sounds for the soul</Text>
         </View>
+
+        <View style={styles.searchSection}>
+          <View style={styles.searchBar}>
+            <Search size={18} color="rgba(212, 175, 55, 0.6)" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by title, artist, genre, or mood..."
+              placeholderTextColor="rgba(212, 175, 55, 0.4)"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <X size={18} color="rgba(212, 175, 55, 0.6)" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {(selectedMood || selectedGenre || searchQuery || showDownloadsOnly) && (
+          <View style={styles.activeFiltersContainer}>
+            <Text style={styles.activeFiltersLabel}>ACTIVE FILTERS:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.activeFiltersScroll}>
+              <AnimatePresence>
+                {searchQuery && (
+                  <MotionView 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    style={styles.filterTag}
+                  >
+                    <Search size={10} color="#0b1e3d" />
+                    <Text style={styles.filterTagText}>"{searchQuery}"</Text>
+                    <TouchableOpacity onPress={() => setSearchQuery('')}>
+                      <X size={10} color="#0b1e3d" />
+                    </TouchableOpacity>
+                  </MotionView>
+                )}
+                {selectedGenre && (
+                  <MotionView 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    style={styles.filterTag}
+                  >
+                    <Filter size={10} color="#0b1e3d" />
+                    <Text style={styles.filterTagText}>{selectedGenre}</Text>
+                    <TouchableOpacity onPress={() => setSelectedGenre(null)}>
+                      <X size={10} color="#0b1e3d" />
+                    </TouchableOpacity>
+                  </MotionView>
+                )}
+                {selectedMood && (
+                  <MotionView 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    style={styles.filterTag}
+                  >
+                    <Tag size={10} color="#0b1e3d" />
+                    <Text style={styles.filterTagText}>{selectedMood}</Text>
+                    <TouchableOpacity onPress={() => setSelectedMood(null)}>
+                      <X size={10} color="#0b1e3d" />
+                    </TouchableOpacity>
+                  </MotionView>
+                )}
+                {showDownloadsOnly && (
+                  <MotionView 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    style={styles.filterTag}
+                  >
+                    <Download size={10} color="#0b1e3d" />
+                    <Text style={styles.filterTagText}>Downloads</Text>
+                    <TouchableOpacity onPress={() => setShowDownloadsOnly(false)}>
+                      <X size={10} color="#0b1e3d" />
+                    </TouchableOpacity>
+                  </MotionView>
+                )}
+              </AnimatePresence>
+            </ScrollView>
+          </View>
+        )}
 
         <View style={styles.moodSection}>
           <Text style={styles.sectionLabel}>BROWSE BY GENRE</Text>
@@ -136,7 +245,7 @@ export default function MusicScreen() {
             </View>
           ) : (
             filteredSongs.map((song, index) => (
-              <motion.div
+              <MotionView
                 key={song.id}
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -158,7 +267,7 @@ export default function MusicScreen() {
                       onPress={() => handleDownload(song.id)}
                     >
                       {downloadedIds.includes(song.id) ? (
-                        <CheckCircle2 size={18} color="#d4af37" />
+                         <CheckCircle2 size={18} color="#d4af37" />
                       ) : (
                         <Download size={18} color="rgba(212, 175, 55, 0.4)" />
                       )}
@@ -169,7 +278,7 @@ export default function MusicScreen() {
                     </TouchableOpacity>
                   </View>
                 </TouchableOpacity>
-              </motion.div>
+              </MotionView>
             ))
           )}
         </View>
@@ -205,7 +314,58 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginTop: 20,
-    marginBottom: 30,
+    marginBottom: 20,
+  },
+  searchSection: {
+    paddingHorizontal: 20,
+    marginBottom: 25,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 42, 82, 0.4)',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    height: 45,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.2)',
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 10,
+    color: '#ffffff',
+    fontSize: 14,
+    fontFamily: 'Playfair Display',
+  },
+  activeFiltersContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  activeFiltersLabel: {
+    color: '#d4af37',
+    fontSize: 8,
+    fontWeight: 'bold',
+    letterSpacing: 1.5,
+    marginBottom: 8,
+    opacity: 0.5,
+  },
+  activeFiltersScroll: {
+    flexDirection: 'row',
+  },
+  filterTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#d4af37',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    marginRight: 8,
+    gap: 6,
+  },
+  filterTagText: {
+    color: '#0b1e3d',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   title: {
     fontSize: 28,
