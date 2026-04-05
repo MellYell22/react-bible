@@ -15,9 +15,11 @@ import { saveAIFeedback } from '../services/supabase';
 import { MOODS_DATA } from '../constants/moods';
 import { WORSHIP_SONGS } from '../constants/songs';
 
+import { useUser } from '../UserContext';
+
 export default function VoiceScreen({ route, navigation }: any) {
   const { playSong, playbackError } = useMusic();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile } = useUser();
   const moodParam = route?.params?.mood;
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -47,7 +49,6 @@ export default function VoiceScreen({ route, navigation }: any) {
   };
 
   useEffect(() => {
-    fetchProfile();
     checkApiKey();
     return () => {
       stopSession();
@@ -84,18 +85,6 @@ export default function VoiceScreen({ route, navigation }: any) {
     if ((window as any).aistudio) {
       await (window as any).aistudio.openSelectKey();
       setHasKey(true);
-    }
-  };
-
-  const fetchProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      if (data) setProfile(data);
     }
   };
 

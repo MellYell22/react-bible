@@ -76,9 +76,11 @@ const NT_BOOKS = [
   '1 John', '2 John', '3 John', 'Jude', 'Revelation'
 ];
 
+import { useUser } from '../UserContext';
+
 export default function MoodScreen({ route, navigation }: any) {
   const { playSong, currentSong, isPlaying } = useMusic();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile } = useUser();
   const [mood, setMood] = useState(route?.params?.mood || '');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -96,7 +98,6 @@ export default function MoodScreen({ route, navigation }: any) {
   const fonts = FONT_SIZES[fontSize];
 
   React.useEffect(() => {
-    fetchProfile();
     if (route?.params?.mood) {
       handleInitialSearch(route.params.mood);
     }
@@ -117,21 +118,10 @@ export default function MoodScreen({ route, navigation }: any) {
 
     setLoading(true);
     try {
-      // We need the profile for translation, but it might not be loaded yet
-      // So we fetch it first if needed
-      let currentProfile = profile;
-      if (!currentProfile) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-          currentProfile = data;
-          setProfile(data);
-        }
-      }
       const data = await getMoodScriptures(
         initialMood, 
-        currentProfile?.preferred_translation || 'KJV',
-        currentProfile?.preferred_response_length || 'short'
+        profile?.preferred_translation || 'KJV',
+        profile?.preferred_response_length || 'short'
       );
       setResult(data);
       setFeedback(null);
@@ -142,20 +132,8 @@ export default function MoodScreen({ route, navigation }: any) {
     }
   };
 
-  const fetchProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      if (data) setProfile(data);
-    }
-  };
-
   const handleSearch = async () => {
-    const query = searchQuery || mood;
+    const query = (searchQuery || mood).trim();
     if (!query) return;
 
     // Check if it's a predefined mood

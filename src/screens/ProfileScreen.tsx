@@ -7,18 +7,20 @@ import { createCheckoutSession } from '../services/stripe';
 import { OWNER_EMAIL, hasProAccess } from '../utils/tier';
 import { PLANS } from '../constants';
 
+import { useUser } from '../UserContext';
+
 export default function ProfileScreen() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile, refreshProfile, signOut } = useUser();
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string, type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
-    fetchProfile();
-    
     // Check for URL parameters (success/canceled)
     const params = new URLSearchParams(window.location.search);
     if (params.get('success')) {
       setStatusMessage({ text: 'Subscription updated successfully! Welcome to the family.', type: 'success' });
+      // Refresh the global profile to reflect the new tier
+      refreshProfile();
       // Clear params from URL
       window.history.replaceState({}, '', window.location.pathname);
     } else if (params.get('canceled')) {
@@ -27,20 +29,8 @@ export default function ProfileScreen() {
     }
   }, []);
 
-  const fetchProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      if (data) setProfile(data);
-    }
-  };
-
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await signOut();
   };
 
   const handleUpgrade = async (tierId: string) => {
@@ -75,7 +65,6 @@ export default function ProfileScreen() {
         .eq('id', profile.id);
       
       if (error) throw error;
-      setProfile({ ...profile, [field]: value });
       setStatusMessage({ text: 'Preferences updated!', type: 'success' });
     } catch (error: any) {
       setStatusMessage({ text: error.message, type: 'error' });

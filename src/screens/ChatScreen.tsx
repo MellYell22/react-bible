@@ -7,9 +7,11 @@ import { supabase, saveAIFeedback } from '../services/supabase';
 import { useMusic } from '../MusicContext';
 import { findSong, extractSongTitle, openYouTubeSearch } from '../utils/music';
 
+import { useUser } from '../UserContext';
+
 export default function ChatScreen({ navigation }: any) {
   const { playSong, playbackError } = useMusic();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile } = useUser();
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'model', content: "Hello, I'm David. How can I encourage you today?" }
   ]);
@@ -21,7 +23,6 @@ export default function ChatScreen({ navigation }: any) {
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   useEffect(() => {
-    fetchProfile();
     return () => {
       if (audioContextRef.current) {
         audioContextRef.current.close();
@@ -48,18 +49,6 @@ export default function ChatScreen({ navigation }: any) {
     }
   }, [playbackError]);
 
-  const fetchProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      if (data) setProfile(data);
-    }
-  };
-
   const detectAndPlaySong = (text: string) => {
     const songTitle = extractSongTitle(text);
     if (!songTitle) return null;
@@ -79,9 +68,10 @@ export default function ChatScreen({ navigation }: any) {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
+    const trimmedInput = input.trim();
+    if (!trimmedInput || loading) return;
 
-    const userMessage: ChatMessage = { role: 'user', content: input.trim() };
+    const userMessage: ChatMessage = { role: 'user', content: trimmedInput };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setLoading(true);
@@ -351,8 +341,15 @@ export default function ChatScreen({ navigation }: any) {
             }
           }}
         />
-        <TouchableOpacity style={styles.sendButton} onPress={handleSend} disabled={loading}>
-          <Send color="#fff" size={20} />
+        <TouchableOpacity 
+          style={[
+            styles.sendButton, 
+            (!input.trim() || loading) && styles.sendButtonDisabled
+          ]} 
+          onPress={handleSend} 
+          disabled={loading || !input.trim()}
+        >
+          <Send color="#fff" size={20} opacity={(!input.trim() || loading) ? 0.5 : 1} />
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -496,5 +493,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
+  },
+  sendButtonDisabled: {
+    backgroundColor: 'rgba(212, 175, 55, 0.3)',
+    shadowOpacity: 0,
+    elevation: 0,
   },
 });

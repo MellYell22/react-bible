@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { Home, Search, MessageCircle, Mic, User, Music, X } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './services/supabase';
 import { Profile } from './types';
@@ -24,9 +24,10 @@ import { VerseOfTheDayModal } from './components/VerseOfTheDayModal';
 import { getVerseOfTheDay } from './services/verseOfTheDay';
 import { Scripture } from './types';
 
+import { UserProvider, useUser } from './UserContext';
+
 function AppContent() {
-  const [session, setSession] = useState<any>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { session, profile, loading, refreshProfile } = useUser();
   const [currentRoute, setCurrentRoute] = useState('Home');
   const [routeParams, setRouteParams] = useState<any>(null);
   const [showVerseModal, setShowVerseModal] = useState(false);
@@ -45,29 +46,7 @@ function AppContent() {
     } else if (path === '/voice') {
       setCurrentRoute('Voice');
     }
-    
-    if (!isSupabaseConfigured) return;
-
-    supabase!.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const { data: { subscription } } = supabase!.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, []);
-
-  useEffect(() => {
-    if (session?.user && isSupabaseConfigured) {
-      fetchProfile();
-    } else {
-      setProfile(null);
-    }
-  }, [session]);
 
   useEffect(() => {
     if (profile?.verse_of_the_day_enabled) {
@@ -100,17 +79,6 @@ function AppContent() {
     }
   };
 
-  const fetchProfile = async () => {
-    if (!supabase) return;
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .single();
-    
-    if (data) setProfile(data);
-  };
-
   if (!isSupabaseConfigured) {
     return (
       <>
@@ -134,6 +102,15 @@ function AppContent() {
     );
   }
 
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#d4af37" />
+        <Text style={{ color: '#d4af37', marginTop: 20, letterSpacing: 2 }}>PREPARING SANCTUARY...</Text>
+      </View>
+    );
+  }
+
   if (!session) {
     return (
       <>
@@ -147,7 +124,7 @@ function AppContent() {
     return (
       <>
         <Analytics />
-        <OnboardingScreen onComplete={fetchProfile} />
+        <OnboardingScreen onComplete={refreshProfile} />
       </>
     );
   }
@@ -233,9 +210,11 @@ function AppContent() {
 
 export default function App() {
   return (
-    <MusicProvider>
-      <AppContent />
-    </MusicProvider>
+    <UserProvider>
+      <MusicProvider>
+        <AppContent />
+      </MusicProvider>
+    </UserProvider>
   );
 }
 

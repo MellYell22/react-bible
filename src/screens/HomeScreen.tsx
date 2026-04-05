@@ -23,8 +23,10 @@ const MOOD_CONFIG = [
 ];
 const TRANSLATIONS = ['NIV', 'KJV', 'NLT', 'ESV', 'NKJV', 'CSB'];
 
+import { useUser } from '../UserContext';
+
 export default function HomeScreen({ navigation }: any) {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile } = useUser();
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showTranslations, setShowTranslations] = useState(false);
@@ -32,25 +34,9 @@ export default function HomeScreen({ navigation }: any) {
   const [loadingReflection, setLoadingReflection] = useState(false);
   const [showVideoGenerator, setShowVideoGenerator] = useState(false);
 
-  const fetchProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      if (data) setProfile(data);
-    }
-  };
-
-  useEffect(() => {
-    fetchProfile();
-  }, []);
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchProfile();
+    // Real-time listener handles the update, but we can manually refresh if needed
     setRefreshing(false);
   };
 
@@ -61,7 +47,6 @@ export default function HomeScreen({ navigation }: any) {
       .update({ preferred_translation: t })
       .eq('id', profile.id);
     if (!error) {
-      setProfile({ ...profile, preferred_translation: t as any });
       setShowTranslations(false);
     }
   };
