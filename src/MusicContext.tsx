@@ -4,6 +4,7 @@ import { Song, WORSHIP_SONGS } from './constants/songs';
 interface MusicContextType {
   currentSong: Song | null;
   isPlaying: boolean;
+  playbackError: string | null;
   playSong: (song: Song) => void;
   pauseSong: () => void;
   resumeSong: () => void;
@@ -11,6 +12,7 @@ interface MusicContextType {
   nextSong: () => void;
   prevSong: () => void;
   setIsPlaying: (playing: boolean) => void;
+  setPlaybackError: (error: string | null) => void;
 }
 
 const MusicContext = createContext<MusicContextType | undefined>(undefined);
@@ -18,8 +20,10 @@ const MusicContext = createContext<MusicContextType | undefined>(undefined);
 export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const playSong = (song: Song) => {
+    setPlaybackError(null);
     setCurrentSong(song);
     setIsPlaying(true);
   };
@@ -37,10 +41,12 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const stopSong = () => {
     setCurrentSong(null);
     setIsPlaying(false);
+    setPlaybackError(null);
   };
 
   const nextSong = () => {
     if (!currentSong) return;
+    setPlaybackError(null);
     const currentIndex = WORSHIP_SONGS.findIndex(s => s.id === currentSong.id);
     const nextIndex = (currentIndex + 1) % WORSHIP_SONGS.length;
     setCurrentSong(WORSHIP_SONGS[nextIndex]);
@@ -49,6 +55,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const prevSong = () => {
     if (!currentSong) return;
+    setPlaybackError(null);
     const currentIndex = WORSHIP_SONGS.findIndex(s => s.id === currentSong.id);
     const prevIndex = (currentIndex - 1 + WORSHIP_SONGS.length) % WORSHIP_SONGS.length;
     setCurrentSong(WORSHIP_SONGS[prevIndex]);
@@ -59,13 +66,15 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     <MusicContext.Provider value={{ 
       currentSong, 
       isPlaying, 
+      playbackError,
       playSong, 
       pauseSong, 
       resumeSong, 
       stopSong, 
       nextSong, 
       prevSong,
-      setIsPlaying 
+      setIsPlaying,
+      setPlaybackError
     }}>
       {children}
     </MusicContext.Provider>

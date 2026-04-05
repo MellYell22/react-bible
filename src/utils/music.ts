@@ -23,12 +23,41 @@ export const findSong = (query: string): Song | null => {
 };
 
 export const extractSongTitle = (text: string): string | null => {
-  const playIntents = [/play\s+(.+)/i, /listen\s+to\s+(.+)/i, /put\s+on\s+(.+)/i, /search\s+for\s+(.+)/i];
+  // David-specific phrases (most specific first)
+  const davidPhrases = [
+    /I\s+am\s+playing\s+['"]?([^'"]+)['"]?\s+for\s+you\s+now/i,
+    /I\s+am\s+putting\s+on\s+['"]?([^'"]+)['"]?\s+for\s+you\s+now/i,
+    /I'm\s+playing\s+['"]?([^'"]+)['"]?\s+for\s+you\s+now/i,
+    /I'm\s+putting\s+on\s+['"]?([^'"]+)['"]?\s+for\s+you\s+now/i,
+    /playing\s+['"]?([^'"]+)['"]?\s+for\s+you\s+now/i,
+    /putting\s+on\s+['"]?([^'"]+)['"]?\s+for\s+you\s+now/i
+  ];
+
+  for (const phrase of davidPhrases) {
+    const match = text.match(phrase);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  // Standard play intents (fallback)
+  const playIntents = [
+    /play\s+['"]?([^'"]+)['"]?/i,
+    /listen\s+to\s+['"]?([^'"]+)['"]?/i,
+    /put\s+on\s+['"]?([^'"]+)['"]?/i,
+    /search\s+for\s+['"]?([^'"]+)['"]?/i,
+    /playing\s+['"]?([^'"]+)['"]?/i,
+    /putting\s+on\s+['"]?([^'"]+)['"]?/i
+  ];
   
   for (const intent of playIntents) {
     const match = text.match(intent);
     if (match && match[1]) {
-      return match[1].trim();
+      // Clean up the extracted title (remove "now", "for you", etc.)
+      let title = match[1].trim();
+      title = title.replace(/\s+now\.*/i, '');
+      title = title.replace(/\s+for\s+you\.*/i, '');
+      return title;
     }
   }
   

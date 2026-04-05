@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, TextInput, ActivityIndicator, Alert } from 'react-native';
 import { Music, Play, Pause, Heart, ChevronRight, Download, CheckCircle2, Search, X, Filter, Tag } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WORSHIP_SONGS, Song } from '../constants/songs';
@@ -22,8 +22,18 @@ const GENRES = [
 ];
 
 export default function MusicScreen() {
-  const { currentSong, isPlaying, playSong, pauseSong, resumeSong, stopSong } = useMusic();
+  const { currentSong, isPlaying, playSong, pauseSong, resumeSong, stopSong, playbackError, setPlaybackError } = useMusic();
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (playbackError) {
+      Alert.alert(
+        "Playback Error",
+        "I found the song, but playback did not start. Let me try another way.",
+        [{ text: "OK", onPress: () => setPlaybackError(null) }]
+      );
+    }
+  }, [playbackError]);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [showDownloadsOnly, setShowDownloadsOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

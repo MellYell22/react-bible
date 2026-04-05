@@ -8,7 +8,7 @@ import { useMusic } from '../MusicContext';
 import { findSong, extractSongTitle, openYouTubeSearch } from '../utils/music';
 
 export default function ChatScreen({ navigation }: any) {
-  const { playSong } = useMusic();
+  const { playSong, playbackError } = useMusic();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'model', content: "Hello, I'm David. How can I encourage you today?" }
@@ -28,6 +28,25 @@ export default function ChatScreen({ navigation }: any) {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (playbackError && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'model' && (lastMessage.content.includes("Playing") || lastMessage.content.includes("putting on"))) {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastIdx = newMessages.length - 1;
+          if (!newMessages[lastIdx].content.includes("playback did not start")) {
+            newMessages[lastIdx] = { 
+              ...newMessages[lastIdx], 
+              content: newMessages[lastIdx].content + "\n\nI found the song, but playback did not start. Let me try another way." 
+            };
+          }
+          return newMessages;
+        });
+      }
+    }
+  }, [playbackError]);
 
   const fetchProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -84,7 +103,30 @@ export default function ChatScreen({ navigation }: any) {
         });
       });
       
-      if (!response) {
+      if (response) {
+        // Check David's response for song triggers
+        const songTitle = extractSongTitle(response);
+        if (songTitle) {
+          const song = findSong(songTitle);
+          if (song && song.isAvailable !== false) {
+            try {
+              playSong(song);
+            } catch (e) {
+              setMessages(prev => {
+                const newMessages = [...prev];
+                newMessages[modelMessageIndex] = { 
+                  role: 'model', 
+                  content: response + "\n\nI found the song, but playback did not start. Let me try another way." 
+                };
+                return newMessages;
+              });
+            }
+          } else {
+            // If not in library, try YouTube
+            openYouTubeSearch(songTitle);
+          }
+        }
+      } else {
         setMessages(prev => {
           const newMessages = [...prev];
           newMessages[modelMessageIndex] = { role: 'model', content: "I'm sorry, I couldn't process that." };

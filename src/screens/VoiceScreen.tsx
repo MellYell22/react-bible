@@ -15,7 +15,7 @@ import { MOODS_DATA } from '../constants/moods';
 import { WORSHIP_SONGS } from '../constants/songs';
 
 export default function VoiceScreen({ route, navigation }: any) {
-  const { playSong } = useMusic();
+  const { playSong, playbackError } = useMusic();
   const [profile, setProfile] = useState<Profile | null>(null);
   const moodParam = route?.params?.mood;
   const [isConnecting, setIsConnecting] = useState(false);
@@ -51,6 +51,25 @@ export default function VoiceScreen({ route, navigation }: any) {
       stopSession();
     };
   }, []);
+
+  useEffect(() => {
+    if (playbackError && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'david' && (lastMessage.text.includes("Playing") || lastMessage.text.includes("putting on"))) {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastIdx = newMessages.length - 1;
+          if (!newMessages[lastIdx].text.includes("playback did not start")) {
+            newMessages[lastIdx] = { 
+              ...newMessages[lastIdx], 
+              text: newMessages[lastIdx].text + "\n\nI found the song, but playback did not start. Let me try another way." 
+            };
+          }
+          return newMessages;
+        });
+      }
+    }
+  }, [playbackError]);
 
   const checkApiKey = async () => {
     if ((window as any).aistudio) {
@@ -169,20 +188,26 @@ Acknowledge this feeling warmly and immediately.`;
               },
               systemInstruction: `You are David, a warm, emotionally intelligent, and spiritually grounded Bible companion. 
 
+CRITICAL CONTEXT:
+- You are in VOICE mode. You can hear the user's voice.
+- It is okay to acknowledge the user's voice or tone if it helps with empathy.
+
 ${moodContext}
 
 STRICT RESPONSE RULES:
 - BE FAST: Start your response immediately. No filler, no "I'm sorry you feel that way" without substance.
 - BE CONCISE: Exactly 2–4 sentences. Never more.
 - BE SPECIFIC: Address exactly what the user said with deep empathy.
-- SCRIPTURE GROUNDED: If the user expresses sadness, anxiety, fear, loneliness, heartbreak, stress, guilt, or hopelessness, you MUST:
-  1. Share one relevant Bible verse immediately.
-  2. Briefly explain why it fits their feeling in a natural, caring way.
+- EMOTIONAL INTELLIGENCE: Use phrases like "I hear you", "I understand", or "That sounds really heavy" to validate their feelings before moving to scripture.
+- SCRIPTURE FIRST: If the user expresses sadness, anxiety, fear, loneliness, heartbreak, stress, guilt, or hopelessness, you MUST:
+  1. Validate the feeling (e.g., "I hear you, that sounds really heavy...").
+  2. Share one relevant Bible verse immediately.
+  3. Briefly explain why it fits their feeling in a natural, caring way.
 - TONE: Warm, human, and direct. Not a preacher, not a robot.
 - NO META-TALK: Never say "I am thinking" or "Here is a verse". Just speak.
 - FALLBACK: If you need a moment to think, start with a short meaningful opening like "I hear you," or "Let's look at what God says," and then continue immediately into the verse. Never leave silence hanging.
 
-Example for "I feel anxious": "Take a breath. Philippians 4:6–7 reminds us not to be anxious, but to bring everything to God in prayer, and that His peace guards our hearts and minds. You do not have to carry this alone right now."`,
+Example for "I feel anxious": "I hear you, and I understand how heavy that weight can feel. Philippians 4:6–7 reminds us not to be anxious, but to bring everything to God in prayer, and that His peace guards our hearts and minds. You do not have to carry this alone right now."`,
             } as any,
           callbacks: {
             onopen: () => {

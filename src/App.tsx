@@ -26,7 +26,7 @@ function AppContent() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [currentRoute, setCurrentRoute] = useState('Home');
   const [routeParams, setRouteParams] = useState<any>(null);
-  const { currentSong, stopSong, nextSong, prevSong } = useMusic();
+  const { currentSong, stopSong, nextSong, prevSong, setPlaybackError } = useMusic();
 
   useEffect(() => {
     // Handle initial route based on URL path
@@ -172,8 +172,8 @@ function AppContent() {
             song={currentSong} 
             onNext={nextSong}
             onPrev={prevSong}
-            onReady={() => {}}
-            onError={() => {}}
+            onReady={() => setPlaybackError(null)}
+            onError={(err) => setPlaybackError(err)}
           />
         </View>
       )}
