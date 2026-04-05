@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, FlatList } from 'react-native';
 import { motion } from 'motion/react';
-import { ChevronRight, ChevronLeft, BookOpen, Book } from 'lucide-react';
+import { ChevronRight, ChevronLeft, BookOpen, Book, Video } from 'lucide-react';
+import { VideoGenerator } from '../components/VideoGenerator';
 
 const MotionView = motion(View);
 import { supabase } from '../services/supabase';
@@ -38,6 +39,7 @@ export default function BibleBrowserScreen() {
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [showVideoGenerator, setShowVideoGenerator] = useState(false);
 
   useEffect(() => {
     fetchProfile();
@@ -160,6 +162,25 @@ export default function BibleBrowserScreen() {
         <Text style={styles.verseBody}>
           This is where the actual scripture text would appear. In a production app, we would fetch this from a Bible API or local database using the selected reference and translation.
         </Text>
+        
+        {showVideoGenerator ? (
+          <VideoGenerator 
+            title={`${selectedBook?.name} ${selectedChapter}:${selectedVerse}`}
+            prompt={`A cinematic, inspiring, and spiritually grounded visual accompaniment for the Bible verse: ${selectedBook?.name} ${selectedChapter}:${selectedVerse}. High quality, peaceful, and reverent.`}
+            onClose={() => setShowVideoGenerator(false)}
+          />
+        ) : (
+          <TouchableOpacity 
+            style={[styles.actionButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#d4af37', marginBottom: 15 }]}
+            onPress={() => setShowVideoGenerator(true)}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Video size={18} color="#d4af37" />
+              <Text style={[styles.actionButtonText, { color: '#d4af37' }]}>GENERATE VISION</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity 
           style={styles.actionButton}
           onPress={() => setView('books')}

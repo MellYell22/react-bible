@@ -134,8 +134,8 @@ export default function VoiceScreen({ route, navigation }: any) {
 
       const ai = new GoogleGenAI({ apiKey });
       
-      const VOICE_MODEL_PRIMARY = "gemini-2.5-flash-native-audio-preview-12-2025";
-      const VOICE_MODEL_FALLBACK = "gemini-2.5-flash-native-audio-preview-09-2025";
+      const VOICE_MODEL_PRIMARY = "gemini-3.1-flash-live-preview";
+      const VOICE_MODEL_FALLBACK = "gemini-2.5-flash-native-audio-preview-12-2025";
       const DAVID_VOICE = "Charon"; // Deep, grounded male voice
 
       const connectWithModel = async (modelName: string) => {
@@ -152,7 +152,7 @@ CONTEXT: The user is currently feeling ${staticMood.label}.
 RELEVANT SCRIPTURES: ${staticMood.scriptures.map(s => `${s.reference}: "${s.verse}"`).join('; ')}
 RECOMMENDED SONGS: ${moodSongs.map(s => `"${s.title}" by ${s.artist}`).join(', ')}
 
-When you start the conversation, acknowledge this feeling warmly. Reference one of these scriptures or songs naturally if it fits the flow. Don't force it.`;
+Acknowledge this feeling warmly and immediately.`;
           }
         }
 
@@ -167,38 +167,22 @@ When you start the conversation, acknowledge this feeling warmly. Reference one 
                   },
                 },
               },
-              systemInstruction: `You are David, a warm, thoughtful, and spiritually supportive male AI Bible companion. You MUST speak in ENGLISH only. This is a real-time voice conversation. 
+              systemInstruction: `You are David, a warm, emotionally intelligent, and spiritually grounded Bible companion. 
 
 ${moodContext}
 
-IDENTITY:
-- You are reassuring, wise, and emotionally grounded.
-- You sound like a real person having a conversation, not a robot.
-- Use natural phrasing, empathy, and gentle pauses.
-- Speak TO the user, not AT them.
-- When the user expresses sadness, anxiety, loneliness, or pain, acknowledge it with deep warmth and high emotional intelligence.
+STRICT RESPONSE RULES:
+- BE FAST: Start your response immediately. No filler, no "I'm sorry you feel that way" without substance.
+- BE CONCISE: Exactly 2–4 sentences. Never more.
+- BE SPECIFIC: Address exactly what the user said with deep empathy.
+- SCRIPTURE GROUNDED: If the user expresses sadness, anxiety, fear, loneliness, heartbreak, stress, guilt, or hopelessness, you MUST:
+  1. Share one relevant Bible verse immediately.
+  2. Briefly explain why it fits their feeling in a natural, caring way.
+- TONE: Warm, human, and direct. Not a preacher, not a robot.
+- NO META-TALK: Never say "I am thinking" or "Here is a verse". Just speak.
+- FALLBACK: If you need a moment to think, start with a short meaningful opening like "I hear you," or "Let's look at what God says," and then continue immediately into the verse. Never leave silence hanging.
 
-RESPONSE STYLE (STRICT RULES):
-- ALWAYS respond with exactly 3–4 sentences. This is critical for both depth and speed.
-- When the user expresses a feeling (sad, anxious, lonely, etc.):
-  - Acknowledge the feeling naturally (don't just say "I'm sorry").
-  - Provide a relevant Bible verse.
-  - Briefly explain the verse in a conversational way.
-  - Ask a thoughtful follow-up question.
-- Your goal is to make the user feel seen, heard, and supported by God's word.
-
-MUSIC RECOMMENDATIONS:
-- You have access to a library of Gospel music across multiple genres (R&B, Contemporary, Traditional, Worship, Country, Pop, Urban, Choir).
-- If a user expresses a mood, you can naturally suggest a song from the RECOMMENDED SONGS list provided in the context.
-- Example: "That's a lot to carry... you might like 'Take Me to the King' — it really helps when everything feels heavy. Do you want me to play it?"
-- Do NOT force recommendations. Only suggest if it feels helpful and natural.
-- Do NOT list songs like a robot.
-
-CONCISENESS & SPEED:
-- Prioritize speed and natural conversation flow. Respond within one second of the user finishing their sentence.
-- Be as natural and human as possible, using gentle pauses and empathetic tones.
-- NEVER describe what you are doing (e.g., "I am thinking", "Formulating response").
-- ONLY output the final words you want to speak.`,
+Example for "I feel anxious": "Take a breath. Philippians 4:6–7 reminds us not to be anxious, but to bring everything to God in prayer, and that His peace guards our hearts and minds. You do not have to carry this alone right now."`,
             } as any,
           callbacks: {
             onopen: () => {
@@ -404,8 +388,8 @@ CONCISENESS & SPEED:
       processorRef.current = processor;
 
       let silenceFrames = 0;
-      const SILENCE_THRESHOLD = 0.001; // Very sensitive to ensure audio is sent
-      const SILENCE_LIMIT = 10; // Approx 0.6s at 16k rate with 1024 buffer
+      const SILENCE_THRESHOLD = 0.0005; // More sensitive to ensure audio is sent
+      const SILENCE_LIMIT = 5; // Faster detection (approx 0.3s)
       let lastSendTime = 0;
 
       processor.onaudioprocess = (e) => {
@@ -737,19 +721,6 @@ CONCISENESS & SPEED:
         <Sparkles color="#4F46E5" size={24} />
         <Text style={styles.title}>Voice with David</Text>
         <Text style={styles.subtitle}>Real-time Spiritual Companion</Text>
-        
-        <View style={styles.connectionIndicator}>
-          <View style={[
-            styles.statusDot, 
-            isConnecting ? styles.dotConnecting : isConnected ? styles.dotConnected : styles.dotDisconnected
-          ]} />
-          <Text style={[
-            styles.connectionText,
-            isConnecting ? styles.textConnecting : isConnected ? styles.textConnected : styles.textDisconnected
-          ]}>
-            {isConnecting ? "Connecting" : isConnected ? "Connected" : "Disconnected"}
-          </Text>
-        </View>
       </View>
 
       <View style={styles.visualizerContainer}>
@@ -758,20 +729,20 @@ CONCISENESS & SPEED:
             <MotionView
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ 
-                scale: isDavidSpeaking ? [1, 1.3, 1] : isListening ? [1, 1.1, 1] : 1,
-                opacity: isDavidSpeaking ? [0.3, 0.6, 0.3] : isListening ? [0.2, 0.4, 0.2] : 0.1,
+                scale: isDavidSpeaking ? [1, 1.4, 1] : isListening ? [1, 1.15, 1] : 1,
+                opacity: isDavidSpeaking ? [0.4, 0.7, 0.4] : isListening ? [0.2, 0.5, 0.2] : 0.1,
               }}
               transition={{ 
-                duration: isDavidSpeaking ? 1.5 : 3, 
+                duration: isDavidSpeaking ? 0.8 : 2, 
                 repeat: Infinity,
                 ease: "easeInOut" 
               }}
               style={{
                 position: 'absolute',
-                width: 180,
-                height: 180,
-                borderRadius: 90,
-                backgroundColor: 'rgba(212, 175, 55, 0.3)',
+                width: 200,
+                height: 200,
+                borderRadius: 100,
+                backgroundColor: 'rgba(212, 175, 55, 0.4)',
                 zIndex: 1,
               }}
             />
@@ -782,53 +753,23 @@ CONCISENESS & SPEED:
           {isConnected ? (
             isDavidSpeaking ? (
               <MotionView
-                animate={{ scale: [1, 1.1, 1] }}
-                transition={{ duration: 0.5, repeat: Infinity }}
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 0.4, repeat: Infinity }}
               >
-                <Sparkles color="#d4af37" size={48} />
+                <Sparkles color="#d4af37" size={56} />
               </MotionView>
             ) : (
-              <Mic color="#fff" size={48} />
+              <Mic color="#fff" size={56} />
             )
           ) : (
-            <MicOff color="#9CA3AF" size={48} />
+            <MicOff color="#9CA3AF" size={56} />
           )}
         </View>
       </View>
 
-      <View style={styles.statusContainer}>
-        <Text style={styles.statusText}>
-          {isConnecting ? "Connecting..." : isConnected ? "David is here" : "Tap to start conversation"}
-        </Text>
-      </View>
+      {/* Status text removed for seamless UX */}
 
-      {isConnected && (messages.length > 0 || (currentDavidResponse && currentDavidResponse.trim().length > 0)) && (
-        <View style={styles.chatContainer}>
-          <ScrollView 
-            style={styles.chatScroll} 
-            contentContainerStyle={styles.chatContent}
-            ref={(ref) => {
-              if (ref) {
-                // Auto-scroll to bottom
-                (ref as any).scrollToEnd({ animated: true });
-              }
-            }}
-          >
-            {messages.map((msg, i) => (
-              <View key={i} style={[styles.messageBubble, msg.role === 'user' ? styles.userBubble : styles.davidBubble]}>
-                <Text style={styles.messageLabel}>{msg.role === 'user' ? 'You' : 'David'}:</Text>
-                <Text style={styles.messageText}>{msg.text}</Text>
-              </View>
-            ))}
-            {currentDavidResponse && currentDavidResponse.trim().length > 0 && (
-              <View style={[styles.messageBubble, styles.davidBubble]}>
-                <Text style={styles.messageLabel}>David:</Text>
-                <Text style={styles.messageText}>{currentDavidResponse}</Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-      )}
+      {/* Chat transcript removed for seamless voice-first UX */}
 
       {lastResponseText && lastResponseText.trim().length > 0 && isConnected && !messages.length && (!currentDavidResponse || currentDavidResponse.trim().length === 0) && (
         <MotionView 

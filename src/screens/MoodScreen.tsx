@@ -13,6 +13,8 @@ import { WORSHIP_SONGS, Song } from '../constants/songs';
 import { MessageCircle } from 'lucide-react';
 import { MusicProvider, useMusic } from '../MusicContext';
 import { MusicPlayer } from '../components/MusicPlayer';
+import { VideoGenerator } from '../components/VideoGenerator';
+import { Video } from 'lucide-react';
 
 type ReadingMode = 'sanctuary' | 'parchment' | 'midnight';
 type FontSize = 'small' | 'medium' | 'large';
@@ -86,6 +88,7 @@ export default function MoodScreen({ route, navigation }: any) {
   const [readingMode, setReadingMode] = useState<ReadingMode>('sanctuary');
   const [fontSize, setFontSize] = useState<FontSize>('medium');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [selectedVerseForVideo, setSelectedVerseForVideo] = useState<{ verse: string, reference: string } | null>(null);
   const audioContextRef = React.useRef<AudioContext | null>(null);
 
   const theme = THEMES[readingMode];
@@ -394,6 +397,14 @@ export default function MoodScreen({ route, navigation }: any) {
                testamentFilter === 'old' ? 'Old Testament Wisdom' : 'New Testament Hope'}
             </Text>
             
+            {selectedVerseForVideo && (
+              <VideoGenerator 
+                title={selectedVerseForVideo.reference}
+                prompt={`A cinematic, inspiring, and spiritually grounded visual accompaniment for the Bible verse: "${selectedVerseForVideo.verse}". The mood is ${mood}. High quality, peaceful, and reverent.`}
+                onClose={() => setSelectedVerseForVideo(null)}
+              />
+            )}
+
             {filteredScriptures.length === 0 ? (
               <View style={styles.noResults}>
                 <Text style={[styles.noResultsText, { color: theme.muted }]}>
@@ -416,6 +427,16 @@ export default function MoodScreen({ route, navigation }: any) {
                   
                   <View style={[styles.divider, { backgroundColor: theme.border }]} />
                   
+                  <View style={styles.verseActions}>
+                    <TouchableOpacity 
+                      style={[styles.verseActionButton, { borderColor: theme.accent }]}
+                      onPress={() => setSelectedVerseForVideo({ verse: item.verse, reference: item.reference })}
+                    >
+                      <Video size={14} color={theme.accent} />
+                      <Text style={[styles.verseActionButtonText, { color: theme.accent }]}>GENERATE VISION</Text>
+                    </TouchableOpacity>
+                  </View>
+
                   <View style={styles.explanationContainer}>
                     <Text style={[styles.explanationLabel, { color: theme.accent }]}>Reflection</Text>
                     <Text style={[styles.explanationText, { color: theme.muted, fontSize: fonts.exp - 2, textAlign: 'left' }]}>
@@ -656,6 +677,25 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   chatButtonText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  verseActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 15,
+  },
+  verseActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  verseActionButtonText: {
     fontSize: 9,
     fontWeight: 'bold',
     letterSpacing: 1,

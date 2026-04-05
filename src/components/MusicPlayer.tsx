@@ -208,9 +208,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ song, onNext, onPrev, 
           </Text>
         </View>
       )}
-      <View style={styles.volumeContainer}>
-        <Volume2 size={18} color="#d4af37" />
-        <input
+      <View style={styles.volumeContainer}><Volume2 size={18} color="#d4af37" /><input
           type="range"
           min="0"
           max="1"
@@ -226,8 +224,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ song, onNext, onPrev, 
             outline: 'none',
             cursor: 'pointer',
           }}
-        />
-      </View>
+        /></View>
     </View>
   );
 };

@@ -194,3 +194,47 @@ export const generateSpeech = async (text: string): Promise<string | null> => {
     return null;
   }
 };
+
+export const generateVideo = async (prompt: string): Promise<string | null> => {
+  try {
+    const ai = getAI();
+    const apiKey = 
+      process.env.GEMINI_API_KEY || 
+      (process.env as any).API_KEY || 
+      (window as any).GEMINI_API_KEY || 
+      "";
+
+    let operation = await ai.models.generateVideos({
+      model: 'veo-3.1-fast-generate-preview',
+      prompt: prompt,
+      config: {
+        numberOfVideos: 1,
+        resolution: '720p',
+        aspectRatio: '16:9'
+      }
+    });
+
+    // Poll for completion
+    while (!operation.done) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      operation = await ai.operations.getVideosOperation({operation: operation});
+    }
+
+    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+    if (!downloadLink) return null;
+
+    const response = await fetch(downloadLink, {
+      method: 'GET',
+      headers: {
+        'x-goog-api-key': apiKey,
+      },
+    });
+
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  } catch (error) {
+    console.error("Video generation error:", error);
+    return null;
+  }
+};

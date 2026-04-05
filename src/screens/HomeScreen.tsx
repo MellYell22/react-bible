@@ -5,9 +5,10 @@ import { supabase } from '../services/supabase';
 
 const MotionView = motion(View);
 import { Profile } from '../types';
-import { Search, Globe, Sparkles, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Zap } from 'lucide-react';
+import { Search, Globe, Sparkles, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Zap, Video } from 'lucide-react';
 import { OWNER_EMAIL } from '../utils/tier';
 import { getVerseReflection } from '../services/gemini';
+import { VideoGenerator } from '../components/VideoGenerator';
 
 const MOOD_CONFIG = [
   { key: 'ANXIOUS', label: 'Anxious', icon: Wind },
@@ -29,6 +30,7 @@ export default function HomeScreen({ navigation }: any) {
   const [showTranslations, setShowTranslations] = useState(false);
   const [reflection, setReflection] = useState<string | null>(null);
   const [loadingReflection, setLoadingReflection] = useState(false);
+  const [showVideoGenerator, setShowVideoGenerator] = useState(false);
 
   const fetchProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -103,11 +105,7 @@ export default function HomeScreen({ navigation }: any) {
             <TouchableOpacity 
               style={styles.translationSelector}
               onPress={() => setShowTranslations(!showTranslations)}
-            >
-              <Globe size={12} color="#d4af37" />
-              <Text style={styles.translationText}>{profile?.preferred_translation || 'KJV'}</Text>
-              <Text style={styles.dropdownArrow}>▼</Text>
-            </TouchableOpacity>
+            ><Globe size={12} color="#d4af37" /><Text style={styles.translationText}>{profile?.preferred_translation || 'KJV'}</Text><Text style={styles.dropdownArrow}>▼</Text></TouchableOpacity>
             
             {showTranslations && (
               <View style={styles.translationDropdown}>
@@ -167,6 +165,27 @@ export default function HomeScreen({ navigation }: any) {
             "Whoever dwells in the shelter of the Most High will rest in the shadow of the Almighty."
           </Text>
           <Text style={styles.verseReference}>— PSALM 91:1</Text>
+          
+          {showVideoGenerator ? (
+            <VideoGenerator 
+              title="Psalm 91:1"
+              prompt="A cinematic, inspiring, and spiritually grounded visual accompaniment for the Bible verse: 'Whoever dwells in the shelter of the Most High will rest in the shadow of the Almighty.' (Psalm 91:1). High quality, peaceful, and reverent."
+              onClose={() => setShowVideoGenerator(false)}
+            />
+          ) : (
+            <TouchableOpacity 
+              style={[styles.reflectionButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#d4af37', marginBottom: 12 }]} 
+              onPress={() => setShowVideoGenerator(true)}
+            >
+              <View style={styles.reflectionButtonContent}>
+                <Video size={14} color="#d4af37" style={{ marginRight: 8 }} />
+                <Text style={[styles.reflectionText, { color: '#d4af37' }]}>
+                  GENERATE VISION
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+
           {reflection ? (
             <MotionView
               initial={{ opacity: 0, y: 10 }}
