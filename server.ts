@@ -163,6 +163,11 @@ app.post("/api/create-checkout-session", async (req, res, next) => {
     } else if (priceId === 'pro') {
       targetPriceId = process.env.STRIPE_PRICE_ID_PRO || process.env.VITE_STRIPE_PRICE_ID_PRO;
     }
+    
+    // Fallback to a generic STRIPE_PRICE_ID if still not found
+    if (!targetPriceId) {
+      targetPriceId = process.env.STRIPE_PRICE_ID;
+    }
 
     if (!targetPriceId) {
       console.error(`[StripeAPI] Price ID not found for plan: ${priceId}`);

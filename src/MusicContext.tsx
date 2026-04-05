@@ -23,6 +23,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const playSong = (song: Song) => {
+    if (song.isAvailable === false) {
+      setPlaybackError("This song is coming soon!");
+      return;
+    }
     setPlaybackError(null);
     setCurrentSong(song);
     setIsPlaying(true);

@@ -38,15 +38,23 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ song, onNext, onPrev, 
   useEffect(() => {
     if (!audioRef.current || !isReady) return;
     
-    if (isPlaying) {
-      audioRef.current.play().catch(e => {
+    const playAudio = async () => {
+      try {
+        if (isPlaying) {
+          await audioRef.current?.play();
+        } else {
+          audioRef.current?.pause();
+        }
+      } catch (e) {
         console.error("Playback failed", e);
-        // Don't set hasError(true) here, as it might just be autoplay policy
-        setIsPlaying(false);
-      });
-    } else {
-      audioRef.current.pause();
-    }
+        // If it fails, it might be due to autoplay policy
+        if (isPlaying) {
+          setIsPlaying(false);
+        }
+      }
+    };
+
+    playAudio();
   }, [isPlaying, isReady]);
 
   useEffect(() => {
@@ -114,7 +122,13 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({ song, onNext, onPrev, 
         audio.src = song.url;
         audio.load();
 
-        // The play() call is now handled by the isPlaying sync useEffect
+        // Autoplay if requested
+        if (isPlaying) {
+          audio.play().catch(e => {
+            console.warn("Autoplay blocked or failed", e);
+            setIsPlaying(false);
+          });
+        }
       } catch (err) {
         console.error("Error setting audio source:", err);
         setHasError(true);

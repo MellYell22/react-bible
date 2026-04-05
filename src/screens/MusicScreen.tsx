@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, 
 import { Music, Play, Pause, Heart, ChevronRight, Download, CheckCircle2, Search, X, Filter, Tag, Check, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WORSHIP_SONGS, Song } from '../constants/songs';
+import { openYouTubeSearch } from '../utils/music';
 
 const MotionView = motion(View);
 import { MusicPlayer } from '../components/MusicPlayer';
@@ -72,6 +73,17 @@ export default function MusicScreen() {
   }, [selectedMoods, selectedGenres, showDownloadsOnly, downloadedIds, searchQuery]);
 
   const handlePlaySong = (song: Song) => {
+    if (song.isAvailable === false) {
+      Alert.alert(
+        "Coming Soon",
+        `"${song.title}" by ${song.artist} is not available in our library yet. Would you like to search for it on YouTube?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Search YouTube", onPress: () => openYouTubeSearch(`${song.title} ${song.artist}`) }
+        ]
+      );
+      return;
+    }
     if (currentSong?.id === song.id) {
       if (isPlaying) {
         pauseSong();
@@ -329,8 +341,7 @@ export default function MusicScreen() {
                     currentSong?.id === song.id && styles.songItemActive,
                     song.isAvailable === false && styles.songItemDisabled
                   ]}
-                  onPress={() => song.isAvailable !== false && handlePlaySong(song)}
-                  disabled={song.isAvailable === false}
+                  onPress={() => handlePlaySong(song)}
                 >
                   <Image source={{ uri: song.coverUrl }} style={[styles.songCover, song.isAvailable === false && { opacity: 0.5 }]} />
                   <View style={styles.songDetails}>
@@ -339,7 +350,10 @@ export default function MusicScreen() {
                     </Text>
                     <Text style={styles.songArtist}>{song.artist}</Text>
                     {song.isAvailable === false && (
-                      <Text style={styles.unavailableBadge}>COMING SOON</Text>
+                      <View style={styles.comingSoonBadge}>
+                        <Tag size={10} color="#d4af37" />
+                        <Text style={styles.comingSoonText}>COMING SOON</Text>
+                      </View>
                     )}
                   </View>
                   <View style={styles.songActions}>
@@ -661,6 +675,23 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 12,
     marginTop: 2,
+  },
+  comingSoonBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+    backgroundColor: 'rgba(212, 175, 55, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  comingSoonText: {
+    color: '#d4af37',
+    fontSize: 8,
+    fontWeight: 'bold',
+    letterSpacing: 1,
   },
   unavailableBadge: {
     color: '#d4af37',
