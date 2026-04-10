@@ -8,10 +8,6 @@ export interface Profile {
   id: string;
   email: string;
   subscription_tier: SubscriptionTier;
-  subscription_status?: string | null;
-  subscription_current_period_end?: string | null;
-  stripe_customer_id?: string | null;
-  stripe_subscription_id?: string | null;
   created_at: string;
   has_completed_onboarding: boolean;
   preferred_translation: BibleTranslation;

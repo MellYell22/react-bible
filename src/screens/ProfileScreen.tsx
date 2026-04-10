@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator
 import { supabase } from '../services/supabase';
 import { Profile } from '../types';
 import { LogOut, CreditCard, Shield, CheckCircle2, AlertCircle, Lock, Star } from 'lucide-react';
-import { createCheckoutSession, UpgradePlanId } from '../services/stripe';
+import { createCheckoutSession } from '../services/stripe';
 import { OWNER_EMAIL, hasProAccess } from '../utils/tier';
 import { PLANS } from '../constants';
 
@@ -21,8 +21,9 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
     const canceled = params.get('canceled') || route?.params?.canceled;
 
     if (success) {
-      setStatusMessage({ text: 'Payment successful. Verifying your subscription...', type: 'info' });
-      verifySubscriptionAfterCheckout();
+      setStatusMessage({ text: 'Subscription updated successfully! Welcome to the family.', type: 'success' });
+      // Refresh the global profile to reflect the new tier
+      refreshProfile();
       // Clear params from URL
       window.history.replaceState({}, '', window.location.pathname);
     } else if (canceled) {
@@ -30,39 +31,6 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [route?.params]);
-
-  const verifySubscriptionAfterCheckout = async () => {
-    if (!profile?.id) {
-      await refreshProfile();
-      return;
-    }
-
-    // Stripe webhooks can arrive a few seconds after the browser redirect.
-    // Poll the profile briefly so users see the upgraded tier without manually refreshing.
-    const maxAttempts = 8;
-    const delayMs = 1800;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('subscription_tier, email')
-        .eq('id', profile.id)
-        .single();
-
-      if (!error && data && (data.subscription_tier === 'plus' || data.subscription_tier === 'pro' || data.email === OWNER_EMAIL)) {
-        await refreshProfile();
-        setStatusMessage({ text: 'Subscription updated successfully! Welcome to the family.', type: 'success' });
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-
-    setStatusMessage({
-      text: 'Payment succeeded, but we are still confirming your plan. Please refresh in a few seconds.',
-      type: 'info',
-    });
-  };
 
   const handleLogout = async () => {
     await signOut();
@@ -78,10 +46,10 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
     console.log(`[StripeDebug] Upgrade button clicked: ${tierId}`);
     
     try {
-      if (!plan || (tierId !== 'plus' && tierId !== 'pro')) {
-        throw new Error(`Unable to start checkout for plan: ${tierId}`);
+      if (!plan || !plan.priceId) {
+        throw new Error(`Price ID for ${tierId} plan is not configured.`);
       }
-      await createCheckoutSession(tierId as UpgradePlanId);
+      await createCheckoutSession(plan.priceId);
     } catch (error: any) {
       console.error(`[StripeDebug] Upgrade error: ${error.message}`);
       setStatusMessage({ text: error.message, type: 'error' });
