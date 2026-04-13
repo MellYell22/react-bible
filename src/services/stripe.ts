@@ -8,6 +8,7 @@ export const createCheckoutSession = async (priceId: string) => {
   }
 
   try {
+    const { data: { user } } = await supabase.auth.getUser();
     const { data: { session } } = await supabase.auth.getSession();
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -25,7 +26,7 @@ export const createCheckoutSession = async (priceId: string) => {
         'Authorization': `Bearer ${session?.access_token || supabaseAnonKey}`,
         'apikey': supabaseAnonKey,
       },
-      body: JSON.stringify({ priceId, userId: session?.user?.id }),
+      body: JSON.stringify({ priceId, userId: user?.id }),
     });
 
     if (!response.ok) {

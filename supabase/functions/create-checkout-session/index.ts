@@ -39,6 +39,13 @@ export default async function handler(req: Request): Promise<Response> {
     try {
         const { priceId, userId } = await req.json();
 
+        if (!userId) {
+            return new Response(JSON.stringify({ error: 'Missing userId' }), {
+                status: 400,
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+        }
+
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{ price: priceId, quantity: 1 }],
