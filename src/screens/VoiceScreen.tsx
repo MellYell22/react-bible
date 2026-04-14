@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { Mic, MicOff, Lock, Sparkles } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+// Note: Animation from 'motion/react' removed for React Native compatibility
 import {
   GoogleGenAI,
   Modality,
@@ -128,9 +128,9 @@ export default function VoiceScreen({ navigation }: any) {
     setDavidText(null);
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY || '';
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
       if (!apiKey) {
-        alert('Missing GEMINI_API_KEY environment variable.');
+        alert('Missing VITE_GEMINI_API_KEY environment variable. Please configure your environment.');
         setIsConnecting(false);
         return;
       }
@@ -304,7 +304,11 @@ You are grounded in the Bible, peaceful, deeply human, and conversational.
     setIsConnecting(false);
 
     if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
-      playbackCtxRef.current.close().catch(() => { });
+      try {
+        playbackCtxRef.current.close();
+      } catch (err) {
+        console.error('[Voice] Error closing playback context:', err);
+      }
       playbackCtxRef.current = null;
     }
   };
@@ -427,7 +431,11 @@ You are grounded in the Bible, peaceful, deeply human, and conversational.
     }
 
     if (captureCtxRef.current && captureCtxRef.current.state !== 'closed') {
-      captureCtxRef.current.close().catch(() => { });
+      try {
+        captureCtxRef.current.close();
+      } catch (err) {
+        console.error('[Voice] Error closing capture context:', err);
+      }
       captureCtxRef.current = null;
     }
 
@@ -489,38 +497,12 @@ You are grounded in the Bible, peaceful, deeply human, and conversational.
       </View>
 
       <View style={styles.visualizerContainer}>
-        <AnimatePresence>
-          {isConnected && (
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{
-                scale: isDavidSpeaking ? [1, 1.3, 1] : isListening ? [1, 1.1, 1] : 1,
-                opacity: isDavidSpeaking ? [0.3, 0.6, 0.3] : isListening ? [0.2, 0.4, 0.2] : 0.1,
-              }}
-              transition={{
-                duration: isDavidSpeaking ? 1.5 : 3,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
-              style={{
-                position: 'absolute',
-                width: 180,
-                height: 180,
-                borderRadius: '50%',
-                backgroundColor: '#d4af37',
-                filter: 'blur(20px)',
-                zIndex: 1,
-              }}
-            />
-          )}
-        </AnimatePresence>
+        {isConnected && <View style={[styles.pulseRing, isDavidSpeaking && styles.pulseRingActive]} />}
 
         <View style={[styles.mainCircle, isConnected && styles.mainActive]}>
           {isConnected ? (
             isDavidSpeaking ? (
-              <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 0.5, repeat: Infinity }}>
-                <Sparkles color="#d4af37" size={48} />
-              </motion.div>
+              <Sparkles color="#d4af37" size={48} />
             ) : (
               <Mic color="#fff" size={48} />
             )
@@ -623,6 +605,17 @@ const styles = StyleSheet.create({
   mainActive: {
     backgroundColor: '#0f2a52',
     borderColor: '#f5d77a',
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(212, 175, 55, 0.3)',
+    zIndex: 1,
+  },
+  pulseRingActive: {
+    backgroundColor: 'rgba(212, 175, 55, 0.5)',
   },
   statusContainer: {
     marginBottom: 40,
