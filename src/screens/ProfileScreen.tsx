@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
 import { supabase } from '../services/supabase';
 import { Profile } from '../types';
@@ -13,37 +13,32 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
   const { profile, refreshProfile, signOut } = useUser();
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string, type: 'success' | 'error' | 'info' } | null>(null);
-  const processedUrlRef = useRef<string | null>(null);
+
+  // Extract query params as stable primitives
+  const params = new URLSearchParams(window.location.search);
+  const success = params.get('success');
+  const canceled = params.get('canceled');
 
   useEffect(() => {
-    // Check for URL parameters (success/canceled)
-    // Use URL to determine if we've already processed this state
-    const currentUrl = window.location.pathname + window.location.search;
-    
-    // Only process if this is a new URL we haven't seen before
-    if (processedUrlRef.current === currentUrl) {
+    // Only run if success or canceled params are present
+    if (!success && !canceled) {
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    const success = params.get('success');
-    const canceled = params.get('canceled');
-
-    if (success || canceled) {
-      processedUrlRef.current = currentUrl;
-
-      if (success) {
-        setStatusMessage({ text: 'Subscription updated successfully! Welcome to the family.', type: 'success' });
-        // Refresh the global profile to reflect the new tier
-        refreshProfile();
-        // Clear params from URL
-        window.history.replaceState({}, '', window.location.pathname);
-      } else if (canceled) {
-        setStatusMessage({ text: 'Checkout canceled. No changes were made.', type: 'info' });
-        window.history.replaceState({}, '', window.location.pathname);
-      }
+    // Handle success redirect from Stripe
+    if (success === 'true') {
+      setStatusMessage({ text: 'Subscription updated successfully! Welcome to the family.', type: 'success' });
+      // Refresh the global profile to reflect the new tier
+      refreshProfile();
+      // Clear params from URL
+      window.history.replaceState({}, document.title, '/profile');
     }
-  }, [refreshProfile]);
+    // Handle canceled redirect from Stripe
+    else if (canceled === 'true') {
+      setStatusMessage({ text: 'Checkout canceled. No changes were made.', type: 'info' });
+      window.history.replaceState({}, document.title, '/profile');
+    }
+  }, [success, canceled, refreshProfile]);
 
   const handleLogout = async () => {
     await signOut();
@@ -53,11 +48,11 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
     if (!profile) return;
     setLoading(true);
     setStatusMessage(null);
-    
+
     const plan = Object.values(PLANS).find(p => p.id === tierId);
-    
+
     console.log(`[StripeDebug] Upgrade button clicked: ${tierId}`);
-    
+
     try {
       if (!plan || !plan.priceId) {
         throw new Error(`Price ID for ${tierId} plan is not configured.`);
@@ -79,7 +74,7 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
         .from('profiles')
         .update({ [field]: value })
         .eq('id', profile.id);
-      
+
       if (error) throw error;
       setStatusMessage({ text: 'Preferences updated!', type: 'success' });
     } catch (error: any) {
@@ -183,15 +178,15 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
         <View style={styles.benefitItem}>
           <CheckCircle2 size={16} color="#10B981" />
           <Text style={styles.benefitText}>
-            {profile?.subscription_tier === 'pro' ? 'Unlimited AI Conversations' : 
-             profile?.subscription_tier === 'plus' ? 'Unlimited Mood Search' : '3 Mood Searches / Day'}
+            {profile?.subscription_tier === 'pro' ? 'Unlimited AI Conversations' :
+              profile?.subscription_tier === 'plus' ? 'Unlimited Mood Search' : '3 Mood Searches / Day'}
           </Text>
         </View>
         <View style={styles.benefitItem}>
           <CheckCircle2 size={16} color="#10B981" />
           <Text style={styles.benefitText}>
-            {profile?.preferred_response_length === 'long' ? 'Comprehensive AI Reflections' : 
-             profile?.preferred_response_length === 'medium' ? 'Standard AI Reflections' : 'Concise AI Reflections'}
+            {profile?.preferred_response_length === 'long' ? 'Comprehensive AI Reflections' :
+              profile?.preferred_response_length === 'medium' ? 'Standard AI Reflections' : 'Concise AI Reflections'}
           </Text>
         </View>
         {profile?.subscription_tier === 'pro' && (
@@ -203,24 +198,24 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
       </View>
 
       <Text style={styles.sectionTitle}>Subscription Plans</Text>
-      
+
       {Object.values(PLANS).map((plan) => {
         const currentTier = profile?.subscription_tier || 'free';
         const isOwner = profile?.email === OWNER_EMAIL;
         const isCurrentPlan = currentTier === plan.id;
-        
+
         // Tier hierarchy: free < plus < pro < owner
         const tierOrder = ['free', 'plus', 'pro', 'owner'];
         const currentTierIndex = tierOrder.indexOf(isOwner ? 'owner' : currentTier);
         const planTierIndex = tierOrder.indexOf(plan.id);
-        
+
         const isIncluded = currentTierIndex >= planTierIndex;
         const canUpgrade = !isIncluded && plan.id !== 'free';
         const isDisabled = loading || isIncluded || plan.id === 'free';
 
         return (
           <View key={plan.id} style={[
-            styles.planCard, 
+            styles.planCard,
             plan.id === 'pro' && styles.proCard,
             isCurrentPlan && styles.currentPlanCard
           ]}>
@@ -230,7 +225,7 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
                 <Text style={styles.proBadgeText}>BEST VALUE</Text>
               </View>
             )}
-            
+
             {isCurrentPlan && (
               <View style={styles.currentBadge}>
                 <CheckCircle2 size={10} color="#fff" />
@@ -265,11 +260,11 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
             </View>
 
             {canUpgrade ? (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[
-                  styles.planButton, 
+                  styles.planButton,
                   plan.id === 'pro' && styles.proButton
-                ]} 
+                ]}
                 onPress={() => handleUpgrade(plan.id)}
                 disabled={loading}
               >
@@ -277,7 +272,7 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
                   <ActivityIndicator size="small" color={plan.id === 'pro' ? '#fff' : '#d4af37'} />
                 ) : (
                   <Text style={[
-                    styles.planButtonText, 
+                    styles.planButtonText,
                     plan.id === 'pro' && { color: '#0b1e3d' }
                   ]}>
                     Upgrade to {plan.name.split(' ')[0]}
@@ -286,7 +281,7 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
               </TouchableOpacity>
             ) : (
               <View style={[
-                styles.planButton, 
+                styles.planButton,
                 styles.activePlanButton,
                 plan.id === 'pro' && styles.activeProButton
               ]}>
