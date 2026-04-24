@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
 import { supabase } from '../services/supabase';
 import { Profile } from '../types';
@@ -13,16 +13,24 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
   const { profile, refreshProfile, signOut } = useUser();
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const hasHandledRedirect = useRef(false);
 
   // Extract params from route prop (passed from App.tsx)
   const success = route?.params?.success;
   const canceled = route?.params?.canceled;
 
   useEffect(() => {
+    // Only run once per redirect to prevent flickering
+    if (hasHandledRedirect.current) {
+      return;
+    }
+
     // Only run if success or canceled params are present
     if (!success && !canceled) {
       return;
     }
+
+    hasHandledRedirect.current = true;
 
     // Handle success redirect from Stripe
     if (success === true) {
@@ -37,7 +45,7 @@ export default function ProfileScreen({ route }: { route?: { params?: any } }) {
       setStatusMessage({ text: 'Checkout canceled. No changes were made.', type: 'info' });
       window.history.replaceState({}, document.title, '/profile');
     }
-  }, [success, canceled, refreshProfile]);
+  }, [success, canceled]);
 
   const handleLogout = async () => {
     await signOut();
