@@ -2,14 +2,13 @@ import { supabase } from './supabase';
 
 export const createCheckoutSession = async (priceId: string) => {
   console.log(`[StripeDebug] Initiating upgrade. PriceId: ${priceId}`);
-
+  
   if (!supabase) {
     throw new Error('Supabase is not configured');
   }
 
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    const { data: { user } } = await supabase.auth.getUser();
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -18,7 +17,7 @@ export const createCheckoutSession = async (priceId: string) => {
     }
 
     console.log(`[StripeDebug] Calling Supabase Edge Function via fetch: create-checkout-session`);
-
+    
     const response = await fetch(`${supabaseUrl}/functions/v1/create-checkout-session`, {
       method: 'POST',
       headers: {
@@ -26,7 +25,7 @@ export const createCheckoutSession = async (priceId: string) => {
         'Authorization': `Bearer ${session?.access_token || supabaseAnonKey}`,
         'apikey': supabaseAnonKey,
       },
-      body: JSON.stringify({ priceId, userId: user?.id }),
+      body: JSON.stringify({ priceId }),
     });
 
     if (!response.ok) {
@@ -48,8 +47,8 @@ export const createCheckoutSession = async (priceId: string) => {
     console.error(`[StripeDebug] Checkout session error: ${error.message}`);
     // If the error already has a descriptive message from the server, use it.
     // Otherwise, use a fallback.
-    const message = error.message && error.message !== '[object Object]'
-      ? error.message
+    const message = error.message && error.message !== '[object Object]' 
+      ? error.message 
       : 'Unable to start checkout. Please try again.';
     throw new Error(message);
   }

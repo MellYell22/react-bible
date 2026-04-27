@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, FlatList } from 'react-native';
 import { motion } from 'motion/react';
-import { ChevronRight, ChevronLeft, BookOpen, Book, Video } from 'lucide-react';
+import { ChevronRight, ChevronLeft, BookOpen, Book, Video, Bookmark, Check } from 'lucide-react';
 import { VideoGenerator } from '../components/VideoGenerator';
 
 const MotionView = motion(View);
-import { supabase } from '../services/supabase';
+import { supabase, saveScripture } from '../services/supabase';
 import { Profile } from '../types';
 
 const BIBLE_BOOKS = [
@@ -40,6 +40,8 @@ export default function BibleBrowserScreen() {
   const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [showVideoGenerator, setShowVideoGenerator] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasSaved, setHasSaved] = useState(false);
 
   useEffect(() => {
     fetchProfile();
@@ -56,16 +58,45 @@ export default function BibleBrowserScreen() {
   const handleBookSelect = (book: typeof BIBLE_BOOKS[0]) => {
     setSelectedBook(book);
     setView('chapters');
+    setHasSaved(false);
   };
 
   const handleChapterSelect = (chapter: number) => {
     setSelectedChapter(chapter);
     setView('verses');
+    setHasSaved(false);
   };
 
   const handleVerseSelect = (verse: number) => {
     setSelectedVerse(verse);
     setView('content');
+    setHasSaved(false);
+  };
+
+  const handleSave = async () => {
+    if (!profile || !selectedBook || !selectedChapter || !selectedVerse || isSaving || hasSaved) return;
+    
+    setIsSaving(true);
+    try {
+      // Note: In content view, we have a mock text. We should save what's there.
+      const scripture = {
+        verse: "This is where the actual scripture text would appear. In a production app, we would fetch this from a Bible API or local database using the selected reference and translation.",
+        reference: `${selectedBook.name} ${selectedChapter}:${selectedVerse}`,
+        explanation: `Reading from the ${profile.preferred_translation || 'KJV'} translation.`
+      };
+
+      await saveScripture(
+        profile.id, 
+        scripture, 
+        profile.preferred_translation || 'KJV',
+        `Bible Browse: ${selectedBook.name}`
+      );
+      setHasSaved(true);
+    } catch (error) {
+      console.error('Error saving scripture:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const goBack = () => {
@@ -180,6 +211,23 @@ export default function BibleBrowserScreen() {
             </View>
           </TouchableOpacity>
         )}
+
+        <TouchableOpacity 
+          style={[styles.actionButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#10B981', marginBottom: 15 }, hasSaved && { opacity: 0.7 }]}
+          onPress={handleSave}
+          disabled={isSaving || hasSaved}
+        >
+          {isSaving ? (
+            <ActivityIndicator size="small" color="#10B981" />
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              {hasSaved ? <Check size={18} color="#10B981" /> : <Bookmark size={18} color="#10B981" />}
+              <Text style={[styles.actionButtonText, { color: '#10B981' }]}>
+                {hasSaved ? 'SAVED TO MY LIST' : 'SAVE TO MY LIST'}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
         <TouchableOpacity 
           style={styles.actionButton}

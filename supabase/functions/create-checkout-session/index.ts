@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import Stripe from "https://esm.sh/stripe@13.10.0?target=deno";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -21,7 +22,7 @@ serve(async (req) => {
   }
 
   try {
-    const { priceId, userId } = await req.json();
+    const { priceId, userId: bodyUserId } = await req.json();
 
     if (!priceId) {
       return new Response(
@@ -30,10 +31,29 @@ serve(async (req) => {
       );
     }
 
+    // Get user ID from JWT if not in body
+    let userId = bodyUserId;
+    if (!userId) {
+      const authHeader = req.headers.get("Authorization");
+      if (authHeader) {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+        const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+          global: { headers: { Authorization: authHeader } },
+        });
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError || !user) {
+          console.error(`[create-checkout-session] Auth error: ${userError?.message}`);
+        } else {
+          userId = user.id;
+        }
+      }
+    }
+
     if (!userId) {
       return new Response(
-        JSON.stringify({ error: "Missing userId" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Unauthorized: Missing userId" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -70,7 +90,6 @@ serve(async (req) => {
         client_reference_id: userId,
         metadata: {
           userId,
-          priceId,
         },
       });
 

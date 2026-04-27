@@ -22,6 +22,15 @@ export interface Scripture {
   explanation: string;
 }
 
+export interface SavedScripture extends Scripture {
+  id: string;
+  user_id: string;
+  version: string;
+  category?: string;
+  is_memorized: boolean;
+  created_at: string;
+}
+
 export interface MoodResponse {
   scriptures: Scripture[];
   encouragement: string;

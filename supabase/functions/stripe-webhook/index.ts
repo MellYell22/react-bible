@@ -8,22 +8,32 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   const signature = req.headers.get("stripe-signature");
   const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+  const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
 
-  if (!signature || !webhookSecret) {
-    return new Response(JSON.stringify({ error: "Missing signature or webhook secret" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
+  // Validate environment and signature
+  if (!signature) {
+    console.error("[Stripe Webhook] Error: Missing stripe-signature header");
+    return new Response(JSON.stringify({ error: "Missing signature" }), { status: 400, headers: corsHeaders });
   }
 
-  const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
-  const stripe = new Stripe(stripeSecretKey!, {
+  if (!webhookSecret) {
+    console.error("[Stripe Webhook] Error: STRIPE_WEBHOOK_SECRET not set");
+    return new Response(JSON.stringify({ error: "Server config error" }), { status: 500, headers: corsHeaders });
+  }
+
+  if (!stripeSecretKey) {
+    console.error("[Stripe Webhook] Error: STRIPE_SECRET_KEY not set");
+    return new Response(JSON.stringify({ error: "Server config error" }), { status: 500, headers: corsHeaders });
+  }
+
+  const stripe = new Stripe(stripeSecretKey, {
     apiVersion: "2023-10-16",
     httpClient: Stripe.createFetchHttpClient(),
   });
@@ -33,10 +43,10 @@ serve(async (req) => {
     const body = await req.text();
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err) {
-    console.error(`Webhook signature verification failed: ${err.message}`);
+    console.error(`[Stripe Webhook] Signature verification failed: ${err.message}`);
     return new Response(JSON.stringify({ error: `Webhook Error: ${err.message}` }), {
       status: 400,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -44,105 +54,98 @@ serve(async (req) => {
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  console.log(`Received event: ${event.type}`);
+  console.log(`[Stripe Webhook] Handling event: ${event.type}`);
 
   try {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const userId = session.client_reference_id || session.metadata?.userId;
-        let priceId = session.metadata?.priceId;
+        const customerId = session.customer as string;
 
-        console.log(`[Webhook] Checkout completed. User: ${userId}, Price (from metadata): ${priceId}`);
-
-        if (!priceId) {
-          try {
-            const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
-            priceId = lineItems.data[0]?.price?.id;
-            console.log(`[Webhook] Price from line items: ${priceId}`);
-          } catch (err) {
-            console.error(`[Webhook] Failed to fetch line items: ${err}`);
-          }
-        }
-
-        if (userId && priceId) {
+        if (userId) {
+          const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
+          const priceId = lineItems.data[0]?.price?.id;
+          
           let tier = "free";
           const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
           const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
 
-          console.log(`[Webhook] Comparing prices - Input: ${priceId}, Plus: ${plusPriceId}, Pro: ${proPriceId}`);
+          if (priceId === plusPriceId) tier = "plus";
+          else if (priceId === proPriceId) tier = "pro";
 
-          if (priceId === plusPriceId) {
-            tier = "plus";
-          } else if (priceId === proPriceId) {
-            tier = "pro";
-          } else {
-            console.warn(`[Webhook] Unknown priceId: ${priceId}. Defaulting to free.`);
-          }
-
-          console.log(`[Webhook] Updating user ${userId} to tier: ${tier}`);
+          console.log(`[Stripe Webhook] Session completed for ${userId}. Tier: ${tier}`);
 
           const { error } = await supabase
             .from("profiles")
             .update({
               subscription_tier: tier,
-              stripe_customer_id: session.customer as string,
+              stripe_customer_id: customerId,
               updated_at: new Date().toISOString(),
             })
             .eq("id", userId);
 
-          if (error) {
-            console.error(`[Webhook] Supabase Error: ${error.message}`);
-            throw error;
-          }
-          console.log(`[Webhook] ✓ Successfully updated user ${userId} to ${tier}`);
-        } else {
-          console.error(`[Webhook] ERROR - Missing userId (${userId}) or priceId (${priceId})`);
+          if (error) throw error;
         }
         break;
       }
 
-      case "customer.subscription.updated": {
+      case "invoice.payment_succeeded": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = invoice.customer as string;
+        const subscriptionId = invoice.subscription as string;
+
+        if (subscriptionId) {
+          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+          const priceId = subscription.items.data[0]?.price?.id;
+          
+          let tier = "free";
+          const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
+          const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
+
+          if (priceId === plusPriceId) tier = "plus";
+          else if (priceId === proPriceId) tier = "pro";
+
+          console.log(`[Stripe Webhook] Payment succeeded for customer ${customerId}. Updating to ${tier}`);
+
+          const { error } = await supabase
+            .from("profiles")
+            .update({
+              subscription_tier: tier,
+              stripe_customer_id: customerId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("stripe_customer_id", customerId);
+
+          if (error) throw error;
+        }
+        break;
+      }
+
+      case "customer.subscription.updated":
+      case "customer.subscription.created": {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
-        const priceId = subscription.items?.data?.[0]?.price?.id;
+        const priceId = subscription.items.data[0]?.price?.id;
 
-        console.log(`[Webhook] Subscription updated. Customer: ${customerId}, Price: ${priceId}`);
+        let tier = "free";
+        const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
+        const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
 
-        if (customerId) {
-          const { data: profile, error: fetchError } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("stripe_customer_id", customerId)
-            .single();
+        if (priceId === plusPriceId) tier = "plus";
+        else if (priceId === proPriceId) tier = "pro";
 
-          if (fetchError) {
-            console.error(`[Webhook] Fetch Error: ${fetchError.message}`);
-          } else if (profile && priceId) {
-            let tier = "free";
-            const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
-            const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
+        console.log(`[Stripe Webhook] Subscription changed for customer ${customerId}. New tier: ${tier}`);
 
-            if (priceId === plusPriceId) tier = "plus";
-            else if (priceId === proPriceId) tier = "pro";
+        const { error } = await supabase
+          .from("profiles")
+          .update({
+            subscription_tier: tier,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("stripe_customer_id", customerId);
 
-            console.log(`[Webhook] Updating user ${profile.id} to tier: ${tier}`);
-
-            const { error: updateError } = await supabase
-              .from("profiles")
-              .update({
-                subscription_tier: tier,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", profile.id);
-
-            if (updateError) {
-              console.error(`[Webhook] Update Error: ${updateError.message}`);
-            } else {
-              console.log(`[Webhook] ✓ Successfully updated user ${profile.id} to ${tier}`);
-            }
-          }
-        }
+        if (error) throw error;
         break;
       }
 
@@ -150,106 +153,34 @@ serve(async (req) => {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
 
-        console.log(`[Webhook] Subscription deleted for customer: ${customerId}`);
+        console.log(`[Stripe Webhook] Subscription deleted for customer ${customerId}`);
 
-        const { data: profile, error: fetchError } = await supabase
+        const { error } = await supabase
           .from("profiles")
-          .select("id")
-          .eq("stripe_customer_id", customerId)
-          .single();
+          .update({
+            subscription_tier: "free",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("stripe_customer_id", customerId);
 
-        if (fetchError) {
-          console.error(`[Webhook] Fetch Error: ${fetchError.message}`);
-        } else if (profile) {
-          console.log(`[Webhook] Resetting user ${profile.id} to free tier`);
-          const { error: updateError } = await supabase
-            .from("profiles")
-            .update({
-              subscription_tier: "free",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", profile.id);
-
-          if (updateError) {
-            console.error(`[Webhook] Update Error: ${updateError.message}`);
-          } else {
-            console.log(`[Webhook] ✓ Successfully reset user ${profile.id} to free`);
-          }
-        } else {
-          console.warn(`[Webhook] No profile found for customerId: ${customerId}`);
-        }
-        break;
-      }
-
-      case "invoice.paid": {
-        // Handle recurring invoice payments
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = invoice.customer as string;
-
-        console.log(`[Webhook] Invoice paid for customer: ${customerId}`);
-
-        if (customerId && invoice.paid) {
-          const { data: profile, error: fetchError } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("stripe_customer_id", customerId)
-            .single();
-
-          if (fetchError) {
-            console.error(`[Webhook] Fetch Error: ${fetchError.message}`);
-          } else if (profile) {
-            // Get subscription to find current tier
-            try {
-              const subscriptions = await stripe.subscriptions.list({
-                customer: customerId,
-                limit: 1,
-              });
-
-              const subscription = subscriptions.data[0];
-              const priceId = subscription?.items?.data?.[0]?.price?.id;
-
-              if (priceId) {
-                let tier = "free";
-                const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
-                const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
-
-                if (priceId === plusPriceId) tier = "plus";
-                else if (priceId === proPriceId) tier = "pro";
-
-                console.log(`[Webhook] Invoice paid - user ${profile.id}, tier: ${tier}`);
-
-                const { error: updateError } = await supabase
-                  .from("profiles")
-                  .update({
-                    subscription_tier: tier,
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq("id", profile.id);
-
-                if (updateError) {
-                  console.error(`[Webhook] Update Error: ${updateError.message}`);
-                } else {
-                  console.log(`[Webhook] ✓ Invoice paid - user ${profile.id} tier maintained as ${tier}`);
-                }
-              }
-            } catch (err) {
-              console.error(`[Webhook] Failed to fetch subscription: ${err}`);
-            }
-          }
-        }
+        if (error) throw error;
         break;
       }
     }
 
+    // Always return 200 for successful receipt
     return new Response(JSON.stringify({ received: true }), {
       status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (err) {
-    console.error(`[Webhook] Error processing event: ${err.message}`);
-    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
+    console.error(`[Stripe Webhook] Error processing event: ${err.message}`);
+    // We return 200 here to acknowledge receipt, but log the error for debugging.
+    // Stripe will see this as successful and won't disable the webhook endpoint.
+    return new Response(JSON.stringify({ received: true, error: err.message }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

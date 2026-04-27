@@ -5,8 +5,8 @@ import { getMoodScriptures, generateSpeech } from '../services/gemini';
 
 const MotionView = motion(View);
 import { MoodResponse } from '../types';
-import { Sparkles, Search, Volume2, Music, Play, Pause, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Cloud, X, ThumbsUp, ThumbsDown } from 'lucide-react';
-import { supabase, saveAIFeedback } from '../services/supabase';
+import { Sparkles, Search, Volume2, Music, Play, Pause, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Cloud, X, ThumbsUp, ThumbsDown, Bookmark, Check } from 'lucide-react';
+import { supabase, saveAIFeedback, saveScripture } from '../services/supabase';
 import { Profile } from '../types';
 import { MOODS_DATA, MoodData } from '../constants/moods';
 import { WORSHIP_SONGS, Song } from '../constants/songs';
@@ -92,6 +92,8 @@ export default function MoodScreen({ route, navigation }: any) {
   const [fontSize, setFontSize] = useState<FontSize>('medium');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [selectedVerseForVideo, setSelectedVerseForVideo] = useState<{ verse: string, reference: string } | null>(null);
+  const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
+  const [savingId, setSavingId] = useState<number | null>(null);
   const audioContextRef = React.useRef<AudioContext | null>(null);
 
   const theme = THEMES[readingMode];
@@ -224,6 +226,25 @@ export default function MoodScreen({ route, navigation }: any) {
     setFeedback(type);
     
     await saveAIFeedback(profile.id, 'mood', result.encouragement, isHelpful);
+  };
+
+  const handleSave = async (item: any, index: number) => {
+    if (!profile || savingId !== null || savedIds.has(index)) return;
+    
+    setSavingId(index);
+    try {
+      await saveScripture(
+        profile.id, 
+        item, 
+        profile.preferred_translation || 'KJV',
+        mood || 'Search'
+      );
+      setSavedIds(prev => new Set(prev).add(index));
+    } catch (error) {
+      console.error('Error saving scripture:', error);
+    } finally {
+      setSavingId(null);
+    }
   };
 
   return (
@@ -445,6 +466,23 @@ export default function MoodScreen({ route, navigation }: any) {
                   <View style={[styles.divider, { backgroundColor: theme.border }]} />
                   
                   <View style={styles.verseActions}>
+                    <TouchableOpacity 
+                      style={[styles.verseActionButton, { borderColor: theme.accent }, savedIds.has(index) && { opacity: 0.7 }]}
+                      onPress={() => handleSave(item, index)}
+                      disabled={savingId === index || savedIds.has(index)}
+                    >
+                      {savingId === index ? (
+                        <ActivityIndicator size="small" color={theme.accent} />
+                      ) : savedIds.has(index) ? (
+                        <Check size={14} color="#10B981" />
+                      ) : (
+                        <Bookmark size={14} color={theme.accent} />
+                      )}
+                      <Text style={[styles.verseActionButtonText, { color: savedIds.has(index) ? '#10B981' : theme.accent }]}>
+                        {savedIds.has(index) ? 'SAVED' : 'SAVE VERSE'}
+                      </Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity 
                       style={[styles.verseActionButton, { borderColor: theme.accent }]}
                       onPress={() => setSelectedVerseForVideo({ verse: item.verse, reference: item.reference })}

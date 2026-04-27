@@ -18,7 +18,7 @@ const getStripe = () => {
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabase = (supabaseUrl && supabaseServiceKey)
+const supabase = (supabaseUrl && supabaseServiceKey) 
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
@@ -72,102 +72,42 @@ export default async function handler(req: any, res: any) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const userId = session.client_reference_id || session.metadata?.userId;
-        let priceId = session.metadata?.priceId;
+        const priceId = session.line_items?.data?.[0]?.price?.id || session.metadata?.priceId;
 
-        console.log(`[StripeWebhook] Checkout completed. User: ${userId}, Price (from metadata): ${priceId}`);
+        console.log(`[StripeWebhook] Checkout completed. User: ${userId}, Price: ${priceId}`);
 
-        // If priceId not in metadata, try to get it from line items
-        if (!priceId) {
-          try {
-            const lineItems = await stripe?.checkout.sessions.listLineItems(session.id);
-            priceId = lineItems?.data?.[0]?.price?.id;
-            console.log(`[StripeWebhook] Price from line items: ${priceId}`);
-          } catch (err) {
-            console.error(`[StripeWebhook] Failed to fetch line items: ${err}`);
-          }
-        }
-
-        if (userId && supabase && priceId) {
+        if (userId && supabase) {
           let tier = "free";
           const plusPriceId = process.env.STRIPE_PRICE_ID_PLUS || process.env.VITE_STRIPE_PRICE_ID_PLUS;
           const proPriceId = process.env.STRIPE_PRICE_ID_PRO || process.env.VITE_STRIPE_PRICE_ID_PRO;
 
-          console.log(`[StripeWebhook] Comparing prices - Input: ${priceId}, Plus: ${plusPriceId}, Pro: ${proPriceId}`);
-
-          if (priceId === plusPriceId) {
-            tier = "plus";
-          } else if (priceId === proPriceId) {
-            tier = "pro";
-          } else {
-            console.warn(`[StripeWebhook] Unknown priceId: ${priceId}. Defaulting to free.`);
+          if (priceId === plusPriceId) tier = "plus";
+          else if (priceId === proPriceId) tier = "pro";
+          else {
+            console.warn(`[StripeWebhook] Unknown priceId: ${priceId}. Defaulting to free or check mapping.`);
           }
 
           console.log(`[StripeWebhook] Updating user ${userId} to tier: ${tier}`);
 
           const { error } = await supabase
             .from("profiles")
-            .update({
+            .update({ 
               subscription_tier: tier,
               stripe_customer_id: session.customer as string,
               updated_at: new Date().toISOString()
             })
             .eq("id", userId);
-
+          
           if (error) {
             console.error(`[StripeWebhook] Supabase Update Error: ${error.message}`);
             throw error;
           }
-          console.log(`[StripeWebhook] ✓ Successfully updated user ${userId} to ${tier}`);
+          console.log(`[StripeWebhook] Successfully updated user ${userId} to ${tier}`);
         } else {
-          console.error(`[StripeWebhook] ERROR - Missing userId (${userId}) or Supabase client (${!!supabase}) or priceId (${priceId})`);
+          console.error(`[StripeWebhook] ERROR: Missing userId (${userId}) or Supabase client (${!!supabase})`);
         }
         break;
       }
-
-      case "customer.subscription.updated": {
-        const subscription = event.data.object as Stripe.Subscription;
-        const customerId = subscription.customer as string;
-        const priceId = subscription.items?.data?.[0]?.price?.id;
-
-        console.log(`[StripeWebhook] Subscription updated. Customer: ${customerId}, Price: ${priceId}`);
-
-        if (supabase && customerId) {
-          const { data: profile, error: fetchError } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("stripe_customer_id", customerId)
-            .single();
-
-          if (fetchError) {
-            console.error(`[StripeWebhook] Supabase Fetch Error: ${fetchError.message}`);
-          } else if (profile && priceId) {
-            let tier = "free";
-            const plusPriceId = process.env.STRIPE_PRICE_ID_PLUS || process.env.VITE_STRIPE_PRICE_ID_PLUS;
-            const proPriceId = process.env.STRIPE_PRICE_ID_PRO || process.env.VITE_STRIPE_PRICE_ID_PRO;
-
-            if (priceId === plusPriceId) tier = "plus";
-            else if (priceId === proPriceId) tier = "pro";
-
-            console.log(`[StripeWebhook] Updating user ${profile.id} to tier: ${tier} (subscription updated)`);
-
-            const { error: updateError } = await supabase
-              .from("profiles")
-              .update({
-                subscription_tier: tier,
-                updated_at: new Date().toISOString()
-              })
-              .eq("id", profile.id);
-
-            if (updateError) {
-              console.error(`[StripeWebhook] Update Error: ${updateError.message}`);
-            } else {
-              console.log(`[StripeWebhook] ✓ Successfully updated user ${profile.id} to ${tier}`);
-            }
-          }
-        }
-        break;
-      }
-
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
@@ -187,88 +127,19 @@ export default async function handler(req: any, res: any) {
             console.log(`[StripeWebhook] Resetting user ${profile.id} to free tier.`);
             const { error: updateError } = await supabase
               .from("profiles")
-              .update({
+              .update({ 
                 subscription_tier: "free",
                 updated_at: new Date().toISOString()
               })
               .eq("id", profile.id);
-
-            if (updateError) {
-              console.error(`[StripeWebhook] Update Error: ${updateError.message}`);
-            } else {
-              console.log(`[StripeWebhook] ✓ Successfully reset user ${profile.id} to free`);
-            }
+            
+            if (updateError) console.error(`[StripeWebhook] Supabase Update Error: ${updateError.message}`);
           } else {
             console.warn(`[StripeWebhook] No profile found for customerId: ${customerId}`);
           }
         }
         break;
       }
-
-      case "invoice.paid": {
-        // Handle recurring invoice payments
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = invoice.customer as string;
-
-        console.log(`[StripeWebhook] Invoice paid for customer: ${customerId}`);
-
-        if (supabase && customerId && !invoice.paid) {
-          console.warn(`[StripeWebhook] Invoice marked paid=false, skipping update`);
-          break;
-        }
-
-        if (supabase && customerId) {
-          const { data: profile, error: fetchError } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("stripe_customer_id", customerId)
-            .single();
-
-          if (fetchError) {
-            console.error(`[StripeWebhook] Supabase Fetch Error: ${fetchError.message}`);
-          } else if (profile) {
-            // Get subscription to find current tier
-            try {
-              const subscriptions = await stripe?.subscriptions.list({
-                customer: customerId,
-                limit: 1,
-              });
-
-              const subscription = subscriptions?.data?.[0];
-              const priceId = subscription?.items?.data?.[0]?.price?.id;
-
-              if (priceId) {
-                let tier = "free";
-                const plusPriceId = process.env.STRIPE_PRICE_ID_PLUS || process.env.VITE_STRIPE_PRICE_ID_PLUS;
-                const proPriceId = process.env.STRIPE_PRICE_ID_PRO || process.env.VITE_STRIPE_PRICE_ID_PRO;
-
-                if (priceId === plusPriceId) tier = "plus";
-                else if (priceId === proPriceId) tier = "pro";
-
-                console.log(`[StripeWebhook] Invoice paid - user ${profile.id}, tier: ${tier}`);
-
-                const { error: updateError } = await supabase
-                  .from("profiles")
-                  .update({
-                    subscription_tier: tier,
-                    updated_at: new Date().toISOString()
-                  })
-                  .eq("id", profile.id);
-
-                if (updateError) {
-                  console.error(`[StripeWebhook] Update Error: ${updateError.message}`);
-                } else {
-                  console.log(`[StripeWebhook] ✓ Invoice paid - user ${profile.id} tier maintained as ${tier}`);
-                }
-              }
-            } catch (err) {
-              console.error(`[StripeWebhook] Failed to fetch subscription for invoice: ${err}`);
-            }
-          }
-        }
-        break;
-      }
-
       default:
         console.log(`[StripeWebhook] Unhandled event type: ${event.type}`);
     }

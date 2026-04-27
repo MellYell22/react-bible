@@ -5,11 +5,12 @@ import { supabase } from '../services/supabase';
 
 const MotionView = motion(View);
 import { Profile, Scripture } from '../types';
-import { Search, Globe, Sparkles, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Zap, Video, Mic } from 'lucide-react';
+import { Search, Globe, Sparkles, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Zap, Video, Mic, Bookmark, Check } from 'lucide-react';
 import { OWNER_EMAIL } from '../utils/tier';
 import { getVerseReflection } from '../services/gemini';
 import { getVerseOfTheDay } from '../services/verseOfTheDay';
 import { VideoGenerator } from '../components/VideoGenerator';
+import { saveScripture } from '../services/supabase';
 
 const MOOD_CONFIG = [
   { key: 'ANXIOUS', label: 'Anxious', icon: Wind },
@@ -35,6 +36,8 @@ export default function HomeScreen({ navigation }: any) {
   const [loadingReflection, setLoadingReflection] = useState(false);
   const [showVideoGenerator, setShowVideoGenerator] = useState(false);
   const [dailyVerse, setDailyVerse] = useState<Scripture | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasSaved, setHasSaved] = useState(false);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -46,8 +49,28 @@ export default function HomeScreen({ navigation }: any) {
     try {
       const verse = await getVerseOfTheDay(profile?.preferred_translation || 'KJV');
       setDailyVerse(verse);
+      setHasSaved(false);
     } catch (error) {
       console.error('Error fetching daily verse:', error);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!profile || !dailyVerse || isSaving || hasSaved) return;
+    
+    setIsSaving(true);
+    try {
+      await saveScripture(
+        profile.id, 
+        dailyVerse, 
+        profile.preferred_translation || 'KJV',
+        'Daily Verse'
+      );
+      setHasSaved(true);
+    } catch (error) {
+      console.error('Error saving scripture:', error);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -166,6 +189,28 @@ export default function HomeScreen({ navigation }: any) {
           </Text>
           <Text style={styles.verseReference}>— {dailyVerse?.reference || "PSALM 91:1"}</Text>
           
+          <View style={styles.verseActions}>
+            <TouchableOpacity 
+              style={[styles.saveButton, hasSaved && styles.saveButtonActive]} 
+              onPress={handleSave}
+              disabled={isSaving || hasSaved}
+            >
+              {isSaving ? (
+                <ActivityIndicator size="small" color="#0b1e3d" />
+              ) : hasSaved ? (
+                <View style={styles.saveButtonContent}>
+                  <Check size={14} color="#10B981" style={{ marginRight: 6 }} />
+                  <Text style={[styles.saveButtonText, { color: '#10B981' }]}>SAVED</Text>
+                </View>
+              ) : (
+                <View style={styles.saveButtonContent}>
+                  <Bookmark size={14} color="#0b1e3d" style={{ marginRight: 6 }} />
+                  <Text style={styles.saveButtonText}>SAVE TO MY LIST</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
           {showVideoGenerator ? (
             <VideoGenerator 
               title={dailyVerse?.reference || "Psalm 91:1"}
@@ -447,7 +492,37 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     letterSpacing: 1.5,
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  verseActions: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 20,
+    gap: 12,
+  },
+  saveButton: {
+    backgroundColor: '#d4af37',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    minWidth: 140,
+    alignItems: 'center',
+  },
+  saveButtonActive: {
+    backgroundColor: 'rgba(212, 175, 55, 0.1)',
+    borderWidth: 1,
+    borderColor: '#d4af37',
+  },
+  saveButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: '#0b1e3d',
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 1,
   },
   reflectionButton: {
     backgroundColor: '#d4af37',

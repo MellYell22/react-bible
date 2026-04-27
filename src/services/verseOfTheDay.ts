@@ -3,8 +3,8 @@ import { Scripture } from "../types";
 
 const getAI = () => {
   const apiKey = 
+    import.meta.env.VITE_GEMINI_API_KEY || 
     process.env.GEMINI_API_KEY || 
-    (process.env as any).API_KEY || 
     (window as any).GEMINI_API_KEY || 
     "";
   

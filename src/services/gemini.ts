@@ -167,8 +167,8 @@ What’s been weighing on you the most lately?"`;
 
 const getAI = () => {
   const apiKey = 
+    import.meta.env.VITE_GEMINI_API_KEY || 
     process.env.GEMINI_API_KEY || 
-    (process.env as any).API_KEY || 
     (window as any).GEMINI_API_KEY || 
     "";
   
@@ -357,8 +357,8 @@ export const generateVideo = async (prompt: string): Promise<string | null> => {
   try {
     const ai = getAI();
     const apiKey = 
+      import.meta.env.VITE_GEMINI_API_KEY || 
       process.env.GEMINI_API_KEY || 
-      (process.env as any).API_KEY || 
       (window as any).GEMINI_API_KEY || 
       "";
 

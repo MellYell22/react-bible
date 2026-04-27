@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SavedScripture } from '../types';
 
 // IMPORTANT: The frontend client MUST ONLY use the public anon key.
 // NEVER use the service_role key in the browser as it bypasses Row Level Security.
@@ -22,6 +23,74 @@ export const supabase: SupabaseClient | null = (isValidUrl(supabaseUrl) && supab
   : null;
 
 export const isSupabaseConfigured = !!supabase;
+
+export const saveScripture = async (userId: string, scripture: { verse: string, reference: string, explanation?: string }, version: string, category?: string) => {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  
+  const { data, error } = await supabase
+    .from('saved_scriptures')
+    .insert({
+      user_id: userId,
+      text: scripture.verse,
+      reference: scripture.reference,
+      explanation: scripture.explanation || '',
+      version: version,
+      category: category || 'Uncategorized',
+      is_memorized: false,
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+};
+
+export const getSavedScriptures = async (userId: string) => {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  
+  const { data, error } = await supabase
+    .from('saved_scriptures')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data as SavedScripture[];
+};
+
+export const toggleMemorized = async (id: string, isMemorized: boolean) => {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  
+  const { error } = await supabase
+    .from('saved_scriptures')
+    .update({ is_memorized: isMemorized })
+    .eq('id', id);
+  
+  if (error) throw error;
+};
+
+export const updateScriptureCategory = async (id: string, category: string) => {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  
+  const { error } = await supabase
+    .from('saved_scriptures')
+    .update({ category })
+    .eq('id', id);
+  
+  if (error) throw error;
+};
+
+export const deleteSavedScripture = async (id: string) => {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  
+  const { error } = await supabase
+    .from('saved_scriptures')
+    .delete()
+    .eq('id', id);
+  
+  if (error) throw error;
+};
 
 export const getProfile = async (userId: string) => {
   if (!supabase) throw new Error("Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment variables.");

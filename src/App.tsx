@@ -34,9 +34,6 @@ function AppContent() {
   const [dailyVerse, setDailyVerse] = useState<Scripture | null>(null);
   const { currentSong, stopSong, nextSong, prevSong, setPlaybackError } = useMusic();
 
-  // Render Analytics once at the top level
-  const analyticsElement = <Analytics />;
-
   useEffect(() => {
     // Handle initial route based on URL path
     const path = window.location.pathname;
@@ -67,7 +64,7 @@ function AppContent() {
 
     const today = new Date().toISOString().split('T')[0];
     const lastShown = localStorage.getItem('last_verse_shown_date');
-
+    
     if (lastShown === today) return;
 
     const now = new Date();
@@ -89,21 +86,24 @@ function AppContent() {
 
   if (!isSupabaseConfigured) {
     return (
-      <View style={styles.configErrorContainer}>
-        <AlertTriangle color="#F59E0B" size={48} />
-        <Text style={styles.configErrorTitle}>Configuration Required</Text>
-        <Text style={styles.configErrorText}>
-          Please set the following environment variables in the Secrets panel.
-          IMPORTANT: The URL must start with https://
-        </Text>
-        <View style={styles.configList}>
-          <Text style={styles.configItem}>• VITE_SUPABASE_URL</Text>
-          <Text style={styles.configItem}>• VITE_SUPABASE_ANON_KEY</Text>
+      <>
+        <Analytics />
+        <View style={styles.configErrorContainer}>
+          <AlertTriangle color="#F59E0B" size={48} />
+          <Text style={styles.configErrorTitle}>Configuration Required</Text>
+          <Text style={styles.configErrorText}>
+            Please set the following environment variables in the Secrets panel. 
+            IMPORTANT: The URL must start with https://
+          </Text>
+          <View style={styles.configList}>
+            <Text style={styles.configItem}>• VITE_SUPABASE_URL</Text>
+            <Text style={styles.configItem}>• VITE_SUPABASE_ANON_KEY</Text>
+          </View>
+          <Text style={styles.configErrorHelp}>
+            After adding these secrets, the app will refresh automatically.
+          </Text>
         </View>
-        <Text style={styles.configErrorHelp}>
-          After adding these secrets, the app will refresh automatically.
-        </Text>
-      </View>
+      </>
     );
   }
 
@@ -118,13 +118,19 @@ function AppContent() {
 
   if (!session) {
     return (
-      <AuthScreen />
+      <>
+        <Analytics />
+        <AuthScreen />
+      </>
     );
   }
 
   if (profile && !profile.has_completed_onboarding) {
     return (
-      <OnboardingScreen onComplete={refreshProfile} />
+      <>
+        <Analytics />
+        <OnboardingScreen onComplete={refreshProfile} />
+      </>
     );
   }
 
@@ -133,31 +139,35 @@ function AppContent() {
     setRouteParams(params);
   };
 
+  const setParams = (params: any) => {
+    setRouteParams((prev: any) => ({ ...prev, ...params }));
+  };
+
   const renderScreen = () => {
-    const nav = { navigate };
+    const nav = { navigate, setParams };
     switch (currentRoute) {
       case 'Home': return <HomeScreen navigation={nav} />;
       case 'Mood': return <MoodScreen navigation={nav} route={{ params: routeParams }} />;
       case 'Chat': return <ChatScreen navigation={nav} />;
       case 'Voice': return <VoiceScreen navigation={nav} />;
       case 'Music': return <MusicScreen />;
-      case 'Profile': return <ProfileScreen route={{ params: routeParams }} />;
+      case 'Profile': return <ProfileScreen navigation={nav} route={{ params: routeParams }} />;
       default: return <HomeScreen navigation={nav} />;
     }
   };
 
   const TabButton = ({ name, icon: Icon }: { name: string, icon: any }) => (
-    <TouchableOpacity
-      style={styles.tabButton}
+    <TouchableOpacity 
+      style={styles.tabButton} 
       onPress={() => navigate(name)}
     >
       {currentRoute === name && <View style={styles.activeIndicator} />}
-      <Icon
-        color={currentRoute === name ? '#d4af37' : 'rgba(255, 255, 255, 0.3)'}
-        size={22}
+      <Icon 
+        color={currentRoute === name ? '#d4af37' : 'rgba(255, 255, 255, 0.3)'} 
+        size={22} 
       />
       <Text style={[
-        styles.tabText,
+        styles.tabText, 
         { color: currentRoute === name ? '#d4af37' : 'rgba(255, 255, 255, 0.3)' }
       ]}>
         {name}
@@ -167,7 +177,7 @@ function AppContent() {
 
   return (
     <View style={styles.container}>
-      {analyticsElement}
+      <Analytics />
       <Navbar onProfile={() => navigate('Profile')} />
       <FullScreenBackground>
         <View style={styles.screenContainer}>
@@ -175,10 +185,10 @@ function AppContent() {
         </View>
       </FullScreenBackground>
 
-      <VerseOfTheDayModal
-        visible={showVerseModal}
-        onClose={() => setShowVerseModal(false)}
-        verse={dailyVerse}
+      <VerseOfTheDayModal 
+        visible={showVerseModal} 
+        onClose={() => setShowVerseModal(false)} 
+        verse={dailyVerse} 
       />
 
       {currentSong && (
@@ -186,8 +196,8 @@ function AppContent() {
           <TouchableOpacity style={styles.closePlayerButton} onPress={stopSong}>
             <X size={20} color="#ff4444" />
           </TouchableOpacity>
-          <MusicPlayer
-            song={currentSong}
+          <MusicPlayer 
+            song={currentSong} 
             onNext={nextSong}
             onPrev={prevSong}
             onReady={() => setPlaybackError(null)}
