@@ -122,10 +122,13 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
     console.log(`[StripeDebug] Upgrade button clicked: ${tierId}`);
     
     try {
+      if (!profile || !profile.id) {
+        throw new Error("You must be logged in to upgrade.");
+      }
       if (!plan || !plan.priceId) {
         throw new Error(`Price ID for ${tierId} plan is not configured.`);
       }
-      await createCheckoutSession(plan.priceId);
+      await createCheckoutSession(profile.id, plan.priceId);
     } catch (error: any) {
       console.error(`[StripeDebug] Upgrade error: ${error.message}`);
       setStatusMessage({ text: error.message, type: 'error' });

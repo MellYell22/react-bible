@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
-export const createCheckoutSession = async (priceId: string) => {
-  console.log(`[StripeDebug] Initiating upgrade. PriceId: ${priceId}`);
+export const createCheckoutSession = async (userId: string, priceId: string) => {
+  console.log(`[StripeDebug] Initiating upgrade. UserId: ${userId}, PriceId: ${priceId}`);
   
   if (!supabase) {
     throw new Error('Supabase is not configured');
@@ -16,7 +16,7 @@ export const createCheckoutSession = async (priceId: string) => {
       throw new Error('Supabase configuration missing');
     }
 
-    console.log(`[StripeDebug] Calling Supabase Edge Function via fetch: create-checkout-session`);
+    console.log("Sending checkout request:", { userId, priceId });
     
     const response = await fetch(`${supabaseUrl}/functions/v1/create-checkout-session`, {
       method: 'POST',
@@ -25,7 +25,7 @@ export const createCheckoutSession = async (priceId: string) => {
         'Authorization': `Bearer ${session?.access_token || supabaseAnonKey}`,
         'apikey': supabaseAnonKey,
       },
-      body: JSON.stringify({ priceId }),
+      body: JSON.stringify({ userId, priceId }),
     });
 
     if (!response.ok) {
