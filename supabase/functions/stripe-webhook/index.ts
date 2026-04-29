@@ -74,14 +74,31 @@ serve(async (req) => {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        const userId = session.client_reference_id || session.metadata?.userId;
+        let userId = session.client_reference_id || session.metadata?.userId;
         const customerId = session.customer as string;
         const subscriptionId = session.subscription as string;
+        const customerEmail = session.customer_details?.email;
 
-        console.log(`[Stripe Webhook] Session completed for user: ${userId}, Customer: ${customerId}, Subscription: ${subscriptionId}`);
+        console.log(`[Stripe Webhook] Session completed. userId: ${userId}, email: ${customerEmail}, customerId: ${customerId}`);
+
+        if (!userId && customerEmail) {
+          console.log(`[Stripe Webhook] userId missing, attempting lookup by email: ${customerEmail}`);
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("email", customerEmail)
+            .maybeSingle();
+          
+          if (profileData) {
+            userId = profileData.id;
+            console.log(`[Stripe Webhook] Found userId ${userId} for email ${customerEmail}`);
+          } else if (profileError) {
+            console.error(`[Stripe Webhook] Error looking up user by email: ${profileError.message}`);
+          }
+        }
 
         if (!userId) {
-          console.error("[Stripe Webhook] CRITICAL: No userId found in session metadata or client_reference_id. Cannot update profile.");
+          console.error("[Stripe Webhook] CRITICAL: No userId found in session and email lookup failed. Cannot update profile.");
           return new Response(JSON.stringify({ error: "Missing userId in session" }), { 
             status: 400, 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
@@ -96,9 +113,15 @@ serve(async (req) => {
 
         console.log(`[Stripe Webhook] Price ID from session: ${priceId}, Expected Pro ID: ${proPriceId}`);
 
-        if (priceId === proPriceId) tier = "pro";
-
-        console.log(`[Stripe Webhook] Updating user ${userId} to tier: ${tier}`);
+        if (priceId === proPriceId) {
+          tier = "pro";
+          console.log("[Stripe Webhook] Tier determined: pro (Matched Price ID)");
+        } else if (!proPriceId && priceId) {
+          console.warn("[Stripe Webhook] WARNING: STRIPE_PRICE_ID_PRO is not set in environment. Defaulting to 'pro' because priceId is present.");
+          tier = "pro";
+        } else {
+          console.log(`[Stripe Webhook] Tier determined: ${tier} (No match)`);
+        }
 
         // Get subscription details if available
         let subscriptionDetails = {};
@@ -112,14 +135,20 @@ serve(async (req) => {
           };
         }
 
-        const { data, error, count } = await supabase
+        console.log(`[Stripe Webhook] Performing update for user ${userId} to tier: ${tier}`);
+
+        const updateData = {
+          subscription_tier: tier,
+          stripe_customer_id: customerId,
+          ...subscriptionDetails,
+          updated_at: new Date().toISOString(),
+        };
+        
+        console.log(`[Stripe Webhook] Update payload: ${JSON.stringify(updateData)}`);
+
+        const { data, error } = await supabase
           .from("profiles")
-          .update({
-            subscription_tier: tier,
-            stripe_customer_id: customerId,
-            ...subscriptionDetails,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq("id", userId)
           .select();
 

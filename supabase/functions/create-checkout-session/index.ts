@@ -24,7 +24,7 @@ serve(async (req) => {
   try {
     const body = await req.json();
     console.log("[create-checkout-session] Received body:", JSON.stringify(body));
-    const { priceId, userId: bodyUserId } = body;
+    const { priceId } = body;
 
     if (!priceId) {
       console.error("[create-checkout-session] Error: Missing priceId");
@@ -34,34 +34,39 @@ serve(async (req) => {
       );
     }
 
-    // Get user from JWT to verify and get email
-    let userId = bodyUserId;
+    // Get user strictly from JWT to verify and get identity
+    let userId: string | undefined = undefined;
     let userEmail: string | undefined = undefined;
     
     const authHeader = req.headers.get("Authorization");
-    if (authHeader) {
-      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        console.error(`[create-checkout-session] Auth error or user not found: ${userError?.message}`);
-      } else {
-        userId = user.id;
-        userEmail = user.email;
-        console.log(`[create-checkout-session] Authenticated user: ${userId}, Email: ${userEmail}`);
-      }
-    }
-
-    if (!userId) {
-      console.error("[create-checkout-session] Error: Missing userId after validation");
+    if (!authHeader) {
+      console.error("[create-checkout-session] Error: Missing Authorization header");
       return new Response(
-        JSON.stringify({ error: "Unauthorized: Missing userId" }),
+        JSON.stringify({ error: "Unauthorized: Missing auth header" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    
+    if (userError || !user) {
+      console.error(`[create-checkout-session] Auth error or user not found: ${userError?.message}`);
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: Invalid token or user not found" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    userId = user.id;
+    userEmail = user.email;
+    console.log(`[create-checkout-session] Authenticated user: ${userId}, Email: ${userEmail}`);
+    console.log("Sending userId to Stripe:", userId);
 
     const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
     if (!stripeSecretKey) {
