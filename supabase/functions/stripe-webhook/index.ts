@@ -33,6 +33,9 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: "Server config error" }), { status: 500, headers: corsHeaders });
   }
 
+  const isTestMode = stripeSecretKey.startsWith("sk_test_");
+  console.log(`[Stripe Webhook] Stripe Mode: ${isTestMode ? "TEST" : "LIVE"}`);
+
   const stripe = new Stripe(stripeSecretKey, {
     apiVersion: "2023-10-16",
     httpClient: Stripe.createFetchHttpClient(),

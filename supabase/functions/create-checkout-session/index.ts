@@ -72,6 +72,9 @@ serve(async (req) => {
       );
     }
 
+    const isTestMode = stripeSecretKey.startsWith("sk_test_");
+    console.log(`[create-checkout-session] Stripe Mode: ${isTestMode ? "TEST" : "LIVE"}`);
+
     const stripe = new Stripe(stripeSecretKey, {
       apiVersion: "2023-10-16",
       httpClient: Stripe.createFetchHttpClient(),

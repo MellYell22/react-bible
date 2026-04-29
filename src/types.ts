@@ -1,4 +1,4 @@
-export type SubscriptionTier = 'free' | 'plus' | 'pro' | 'owner';
+export type SubscriptionTier = 'free' | 'pro' | 'owner';
 
 export type BibleTranslation = 'KJV' | 'NIV' | 'ESV' | 'NKJV' | 'NASB' | 'NLT' | 'CSB' | 'AMP' | 'MSG';
 

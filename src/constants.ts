@@ -16,16 +16,16 @@ export const PLANS = {
   },
   PRO: {
     id: 'pro',
-    name: 'Pro Plan',
+    name: 'Pro',
     price: '$9.99',
     interval: 'mo',
     priceId: import.meta.env.VITE_STRIPE_PRICE_ID_PRO,
     features: [
-      'Unlimited Everything',
-      'Long AI Reflections',
-      'Live Voice Chat with David',
-      'Advanced AI Companion',
-      'Early Access to Features',
+      'Unlimited AI chat with David',
+      'Live voice chat with David',
+      'Mood-based music and reflections',
+      'Deeper scripture insights',
+      'Ad-free experience',
     ],
   },
 };

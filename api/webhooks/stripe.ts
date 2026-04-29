@@ -78,11 +78,9 @@ export default async function handler(req: any, res: any) {
 
         if (userId && supabase) {
           let tier = "free";
-          const plusPriceId = process.env.STRIPE_PRICE_ID_PLUS || process.env.VITE_STRIPE_PRICE_ID_PLUS;
           const proPriceId = process.env.STRIPE_PRICE_ID_PRO || process.env.VITE_STRIPE_PRICE_ID_PRO;
 
-          if (priceId === plusPriceId) tier = "plus";
-          else if (priceId === proPriceId) tier = "pro";
+          if (priceId === proPriceId) tier = "pro";
           else {
             console.warn(`[StripeWebhook] Unknown priceId: ${priceId}. Defaulting to free or check mapping.`);
           }

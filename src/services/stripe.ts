@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 
 export const createCheckoutSession = async (priceId: string) => {
+  console.log("Using Stripe Price ID:", priceId);
   console.log(`[StripeDebug] Initiating upgrade. PriceId: ${priceId}`);
   
   if (!supabase) {
@@ -20,11 +21,17 @@ export const createCheckoutSession = async (priceId: string) => {
     
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+
+    if (publishableKey) {
+      console.log(`[StripeDebug] Frontend Mode: ${publishableKey.startsWith('pk_test_') ? 'TEST' : 'LIVE'}`);
+    }
 
     if (!supabaseUrl || !supabaseAnonKey) {
       throw new Error('Supabase configuration missing');
     }
 
+    console.log("Using Stripe Price ID:", priceId);
     console.log("Sending checkout request:", { userId, priceId });
     
     const response = await fetch(`${supabaseUrl}/functions/v1/create-checkout-session`, {

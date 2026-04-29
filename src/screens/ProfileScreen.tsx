@@ -343,20 +343,25 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
         <View style={styles.benefitItem}>
           <CheckCircle2 size={16} color="#10B981" />
           <Text style={styles.benefitText}>
-            {profile?.subscription_tier === 'pro' ? 'Unlimited AI Conversations' : '3 Mood Searches / Day'}
+            {profile?.subscription_tier === 'pro' ? 'Unlimited AI Chat with David' : '3 Mood Searches / Day'}
           </Text>
         </View>
         <View style={styles.benefitItem}>
           <CheckCircle2 size={16} color="#10B981" />
           <Text style={styles.benefitText}>
-            {profile?.preferred_response_length === 'long' ? 'Comprehensive AI Reflections' : 
-             profile?.preferred_response_length === 'medium' ? 'Standard AI Reflections' : 'Concise AI Reflections'}
+            {profile?.subscription_tier === 'pro' ? 'Live Voice Chat with David' : 'Standard AI Reflections'}
+          </Text>
+        </View>
+        <View style={styles.benefitItem}>
+          <CheckCircle2 size={16} color="#10B981" />
+          <Text style={styles.benefitText}>
+            {profile?.subscription_tier === 'pro' ? 'Mood-based Music and Reflections' : 'Daily Verse of the Day'}
           </Text>
         </View>
         {profile?.subscription_tier === 'pro' && (
           <View style={styles.benefitItem}>
             <CheckCircle2 size={16} color="#10B981" />
-            <Text style={styles.benefitText}>Live Voice Chat with David</Text>
+            <Text style={styles.benefitText}>Deeper Scripture Insights & Ad-free</Text>
           </View>
         )}
       </View>
