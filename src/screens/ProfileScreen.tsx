@@ -303,7 +303,7 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
           })}
         </View>
         {!hasProAccess(profile) && (
-          <Text style={styles.settingsHint}>Upgrade to Plus or Pro to unlock medium and long responses.</Text>
+          <Text style={styles.settingsHint}>Upgrade to Pro to unlock medium and long responses.</Text>
         )}
 
         <View style={[styles.divider, { marginVertical: 20 }]} />
@@ -343,8 +343,7 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
         <View style={styles.benefitItem}>
           <CheckCircle2 size={16} color="#10B981" />
           <Text style={styles.benefitText}>
-            {profile?.subscription_tier === 'pro' ? 'Unlimited AI Conversations' : 
-             profile?.subscription_tier === 'plus' ? 'Unlimited Mood Search' : '3 Mood Searches / Day'}
+            {profile?.subscription_tier === 'pro' ? 'Unlimited AI Conversations' : '3 Mood Searches / Day'}
           </Text>
         </View>
         <View style={styles.benefitItem}>
@@ -369,8 +368,8 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
         const isOwner = profile?.email === OWNER_EMAIL;
         const isCurrentPlan = currentTier === plan.id;
         
-        // Tier hierarchy: free < plus < pro < owner
-        const tierOrder = ['free', 'plus', 'pro', 'owner'];
+        // Tier hierarchy: free < pro < owner
+        const tierOrder = ['free', 'pro', 'owner'];
         const currentTierIndex = tierOrder.indexOf(isOwner ? 'owner' : currentTier);
         const planTierIndex = tierOrder.indexOf(plan.id);
         

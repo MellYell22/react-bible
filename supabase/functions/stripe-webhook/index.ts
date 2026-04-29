@@ -68,11 +68,9 @@ serve(async (req) => {
           const priceId = lineItems.data[0]?.price?.id;
           
           let tier = "free";
-          const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
           const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
 
-          if (priceId === plusPriceId) tier = "plus";
-          else if (priceId === proPriceId) tier = "pro";
+          if (priceId === proPriceId) tier = "pro";
 
           console.log(`[Stripe Webhook] Session completed for ${userId}. Tier: ${tier}`);
 
@@ -100,11 +98,9 @@ serve(async (req) => {
           const priceId = subscription.items.data[0]?.price?.id;
           
           let tier = "free";
-          const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
           const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
 
-          if (priceId === plusPriceId) tier = "plus";
-          else if (priceId === proPriceId) tier = "pro";
+          if (priceId === proPriceId) tier = "pro";
 
           console.log(`[Stripe Webhook] Payment succeeded for customer ${customerId}. Updating to ${tier}`);
 
@@ -129,11 +125,9 @@ serve(async (req) => {
         const priceId = subscription.items.data[0]?.price?.id;
 
         let tier = "free";
-        const plusPriceId = Deno.env.get("STRIPE_PRICE_ID_PLUS");
         const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
 
-        if (priceId === plusPriceId) tier = "plus";
-        else if (priceId === proPriceId) tier = "pro";
+        if (priceId === proPriceId) tier = "pro";
 
         console.log(`[Stripe Webhook] Subscription changed for customer ${customerId}. New tier: ${tier}`);
 
