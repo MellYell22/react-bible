@@ -12,6 +12,7 @@ import ChatScreen from './screens/ChatScreen';
 import VoiceScreen from './screens/VoiceScreen';
 import MusicScreen from './screens/MusicScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import PaymentSuccessScreen from './screens/PaymentSuccessScreen';
 import AuthScreen from './screens/AuthScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
 
@@ -37,12 +38,19 @@ function AppContent() {
   useEffect(() => {
     // Handle initial route based on URL path
     const path = window.location.pathname;
-    if (path === '/profile' || path === '/success' || path === '/cancel') {
-      setCurrentRoute('Profile');
-      if (path === '/success') {
-        setRouteParams({ success: true });
-      } else if (path === '/cancel') {
-        setRouteParams({ canceled: true });
+    if (path === '/profile' || path === '/success' || path === '/cancel' || path === '/payment-success' || path === '/pricing') {
+      if (path === '/payment-success') {
+        setCurrentRoute('PaymentSuccess');
+      } else if (path === '/pricing') {
+        setCurrentRoute('Profile');
+        setRouteParams({ showPricing: true });
+      } else {
+        setCurrentRoute('Profile');
+        if (path === '/success') {
+          setRouteParams({ success: true });
+        } else if (path === '/cancel') {
+          setRouteParams({ canceled: true });
+        }
       }
     } else if (path === '/mood') {
       setCurrentRoute('Mood');
@@ -152,6 +160,7 @@ function AppContent() {
       case 'Voice': return <VoiceScreen navigation={nav} />;
       case 'Music': return <MusicScreen />;
       case 'Profile': return <ProfileScreen navigation={nav} route={{ params: routeParams }} />;
+      case 'PaymentSuccess': return <PaymentSuccessScreen navigation={nav} />;
       default: return <HomeScreen navigation={nav} />;
     }
   };

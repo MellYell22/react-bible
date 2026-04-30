@@ -38,12 +38,101 @@ const supabase = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
-app.use(express.json());
+app.use(express.json({
+  verify: (req: any, res, buf) => {
+    if (req.url?.startsWith('/api/stripe-webhook')) {
+      req.rawBody = buf;
+    }
+  }
+}));
 
 // Request Logger
 app.use((req, res, next) => {
   console.log(`[Server] ${req.method} ${req.url}`);
   next();
+});
+
+// Stripe Webhook handler for local development
+app.post("/api/stripe-webhook", async (req: any, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const stripe = getStripe();
+
+  if (!stripe || !sig || !webhookSecret) {
+    console.error("[Server Webhook] Missing configuration");
+    return res.status(400).send("Webhook Error: Missing configuration");
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
+  } catch (err: any) {
+    console.error(`[Server Webhook] Verification failed: ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  console.log(`[Server Webhook] Received ${event.type}`);
+
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const userId = session.client_reference_id || session.metadata?.userId;
+        const customerId = session.customer as string;
+        
+        if (userId && supabase) {
+          await supabase.from('profiles').update({
+            stripe_customer_id: customerId,
+            subscription_tier: 'pro',
+            updated_at: new Date().toISOString()
+          }).eq('id', userId);
+          console.log(`[Server Webhook] Updated user ${userId} to pro`);
+        }
+        break;
+      }
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated': {
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
+        const userId = subscription.metadata?.userId;
+        const status = subscription.status;
+        const tier = (status === 'active' || status === 'trialing') ? 'pro' : 'free';
+
+        if (supabase) {
+          let query = supabase.from('profiles').update({
+            subscription_tier: tier,
+            updated_at: new Date().toISOString()
+          });
+
+          if (userId) {
+            query = query.eq('id', userId);
+          } else {
+            query = query.eq('stripe_customer_id', customerId);
+          }
+
+          await query;
+          console.log(`[Server Webhook] Updated user (userId: ${userId || 'none'}, customer: ${customerId}) to ${tier}`);
+        }
+        break;
+      }
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
+        if (supabase) {
+          await supabase.from('profiles').update({
+            subscription_tier: 'free',
+            updated_at: new Date().toISOString()
+          }).eq('stripe_customer_id', customerId);
+          console.log(`[Server Webhook] Reset customer ${customerId} to free`);
+        }
+        break;
+      }
+    }
+    res.json({ received: true });
+  } catch (error: any) {
+    console.error(`[Server Webhook] Error: ${error.message}`);
+    res.status(500).send("Internal Server Error");
+  }
 });
 
 // API Routes

@@ -22,6 +22,8 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
   const [isActivating, setIsActivating] = useState(false);
   const hasHandledRedirect = useRef(false);
   const pollingInterval = useRef<NodeJS.Timeout | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const pricingRef = useRef<View>(null);
 
   useEffect(() => {
     return () => {
@@ -45,13 +47,28 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
   }, [isActivating, profile?.subscription_tier]);
 
   useEffect(() => {
+    if (route?.params?.showPricing && !showSavedScriptures) {
+      setTimeout(() => {
+        pricingRef.current?.measureLayout(
+          (scrollViewRef.current as any).getInnerViewNode(),
+          (x, y) => {
+            scrollViewRef.current?.scrollTo({ y: y - 20, animated: true });
+          },
+          () => {}
+        );
+      }, 500);
+    }
+  }, [route?.params?.showPricing, showSavedScriptures]);
+
+  useEffect(() => {
     // Return early if we've already handled this redirect in this component instance
     if (hasHandledRedirect.current) return;
 
     // Check for URL parameters (success/canceled)
     const urlParams = new URLSearchParams(window.location.search);
-    const success = urlParams.get('success') === 'true' || route?.params?.success;
+    const success = urlParams.get('success') === 'true' || route?.params?.success || route?.params?.paymentSuccess;
     const canceled = urlParams.get('canceled') === 'true' || route?.params?.canceled;
+    const showPricing = route?.params?.showPricing;
 
     if (success || canceled) {
       console.log(`[StripeDebug] Handling Stripe redirect. Success: ${!!success}, Canceled: ${!!canceled}`);
@@ -67,7 +84,7 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
           
           // Start polling for subscription update
           let attempts = 0;
-          const maxAttempts = 10; // 10 attempts * 3 seconds = 30 seconds
+          const maxAttempts = 20; // 20 attempts * 3 seconds = 60 seconds
           
           pollingInterval.current = setInterval(async () => {
             attempts++;
@@ -204,7 +221,11 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView 
+      ref={scrollViewRef}
+      style={styles.container} 
+      contentContainerStyle={styles.content}
+    >
       <View style={styles.header}>
         {isActivating && (
           <View style={styles.activatingLoader}>
@@ -423,7 +444,9 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
         )}
       </View>
 
-      <Text style={styles.sectionTitle}>Subscription Plans</Text>
+      <Text style={styles.sectionTitle} onLayout={(e) => {
+        // Fallback for measurement if needed
+      }} ref={pricingRef}>Subscription Plans</Text>
       
       {Object.values(PLANS).map((plan) => {
         const currentTier = profile?.subscription_tier || 'free';

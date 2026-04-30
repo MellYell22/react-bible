@@ -100,8 +100,13 @@ serve(async (req) => {
           },
         ],
         mode: "subscription",
-        success_url: `${origin}/profile?success=true`,
-        cancel_url: `${origin}/profile?canceled=true`,
+        subscription_data: {
+          metadata: {
+            userId,
+          },
+        },
+        success_url: `https://react-bible-six.vercel.app/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `https://react-bible-six.vercel.app/pricing`,
         client_reference_id: userId,
         metadata: {
           userId,
