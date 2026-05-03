@@ -52,37 +52,42 @@ export default async function handler(req: any, res: any) {
 
   // Helper to find profile by Stripe ID or Email
   const findProfile = async (customerId: string, email: string | null, userIdFromMetadata?: string | null) => {
-    console.log(`[Stripe Webhook] Debug: customerId=${customerId}, email=${email}, userIdFromMetadata=${userIdFromMetadata}`);
+    console.log(`[Stripe Webhook] Looking for profile: customerId=${customerId}, email=${email}, userIdFromMetadata=${userIdFromMetadata}`);
     
     // 1. Try metadata ID if provided
     if (userIdFromMetadata) {
+      console.log(`[Stripe Webhook] Attempting match by metadata ID/client_reference_id: ${userIdFromMetadata}`);
       const { data } = await supabase.from('profiles').select('id, email, stripe_customer_id').eq('id', userIdFromMetadata).maybeSingle();
       if (data) {
-        console.log(`[Stripe Webhook] User found by metadata ID: ${data.id}`);
+        console.log(`[Stripe Webhook] Match SUCCESS: User found by metadata ID: ${data.id}`);
         return data;
       }
+      console.log(`[Stripe Webhook] Match FAILED: No user found with ID: ${userIdFromMetadata}`);
     }
 
     // 2. Try Stripe Customer ID
     if (customerId) {
+      console.log(`[Stripe Webhook] Attempting match by stripe_customer_id: ${customerId}`);
       const { data } = await supabase.from('profiles').select('id, email, stripe_customer_id').eq('stripe_customer_id', customerId).maybeSingle();
       if (data) {
-        console.log(`[Stripe Webhook] User found by stripe_customer_id: ${data.id}`);
+        console.log(`[Stripe Webhook] Match SUCCESS: User found by stripe_customer_id: ${data.id}`);
         return data;
       }
+      console.log(`[Stripe Webhook] Match FAILED: No user found with stripe_customer_id: ${customerId}`);
     }
 
     // 3. Fallback to Email
     if (email) {
-      console.log(`[Stripe Webhook] Fallback: Searching by email ${email}`);
+      console.log(`[Stripe Webhook] Attempting match by email fallback: ${email}`);
       const { data } = await supabase.from('profiles').select('id, email, stripe_customer_id').eq('email', email).maybeSingle();
       if (data) {
-        console.log(`[Stripe Webhook] User found by email fallback: ${data.id}`);
+        console.log(`[Stripe Webhook] Match SUCCESS: User found by email fallback: ${data.id}`);
         return data;
       }
+      console.log(`[Stripe Webhook] Match FAILED: No user found with email: ${email}`);
     }
 
-    console.log(`[Stripe Webhook] No user matched for customerId: ${customerId}, email: ${email}`);
+    console.log(`[Stripe Webhook] Profile lookup COMPLETE: No matching user found for customerId: ${customerId}, email: ${email}`);
     return null;
   };
 
@@ -94,10 +99,12 @@ export default async function handler(req: any, res: any) {
         const customerEmail = session.customer_details?.email || session.customer_email || null;
         const userIdMetadata = session.client_reference_id || session.metadata?.userId || session.metadata?.user_id;
         
+        console.log(`[Stripe Webhook] Processing event: ${event.type} | Session: ${session.id} | Customer: ${customerId} | Email: ${customerEmail}`);
+        
         const profile = await findProfile(customerId, customerEmail, userIdMetadata);
 
         if (profile) {
-          console.log(`[Stripe Webhook] Upgrading User ${profile.id} to Pro`);
+          console.log(`[Stripe Webhook] Found user ${profile.id}. Proceeding with Pro upgrade.`);
           const { error } = await supabase
             .from('profiles')
             .update({
@@ -111,10 +118,12 @@ export default async function handler(req: any, res: any) {
             .eq('id', profile.id);
 
           if (error) {
-            console.error(`[Stripe Webhook] Error upgrading profile for user ${profile.id}: ${error.message}`);
+            console.error(`[Stripe Webhook] DB Update FAILED for user ${profile.id}: ${error.message}`);
           } else {
-            console.log(`[Stripe Webhook] User ${profile.id} upgrade succeeded.`);
+            console.log(`[Stripe Webhook] DB Update SUCCESS: User ${profile.id} is now Pro.`);
           }
+        } else {
+          console.error(`[Stripe Webhook] CRITICAL: Could not identify user for completed checkout session.`);
         }
         break;
       }
@@ -125,9 +134,12 @@ export default async function handler(req: any, res: any) {
         const customerEmail = invoice.customer_email;
         const subscriptionId = invoice.subscription as string;
 
+        console.log(`[Stripe Webhook] Processing event: ${event.type} | Invoice: ${invoice.id} | Customer: ${customerId} | Email: ${customerEmail}`);
+
         const profile = await findProfile(customerId, customerEmail);
 
         if (profile) {
+          console.log(`[Stripe Webhook] Found user ${profile.id}. Processing paid invoice.`);
           const { error } = await supabase
             .from('profiles')
             .update({
@@ -141,8 +153,13 @@ export default async function handler(req: any, res: any) {
             })
             .eq('id', profile.id);
             
-          if (error) console.error(`[Stripe Webhook] Error updating profile on invoice.paid: ${error.message}`);
-          else console.log(`[Stripe Webhook] User ${profile.id} upgraded/confirmed Pro via invoice.paid`);
+          if (error) {
+            console.error(`[Stripe Webhook] DB Update FAILED for user ${profile.id} on invoice payment: ${error.message}`);
+          } else {
+            console.log(`[Stripe Webhook] DB Update SUCCESS: User ${profile.id} Pro status confirmed via invoice payment.`);
+          }
+        } else {
+          console.log(`[Stripe Webhook] No user found for paid invoice ${invoice.id}.`);
         }
         break;
       }
@@ -154,12 +171,14 @@ export default async function handler(req: any, res: any) {
         const userIdMetadata = subscription.metadata?.userId || subscription.metadata?.user_id;
         const status = subscription.status;
         
-        // Subscriptions don't have email in the object, so we might have to rely on ID or fetch
-        // But let's check if metadata has it or if we can find it by ID first
+        console.log(`[Stripe Webhook] Processing event: ${event.type} | Subscription: ${subscription.id} | Customer: ${customerId} | Status: ${status}`);
+
         const profile = await findProfile(customerId, null, userIdMetadata);
 
         if (profile) {
           const tier = (status === 'active' || status === 'trialing') ? 'pro' : 'free';
+          console.log(`[Stripe Webhook] Found user ${profile.id}. Updating status to ${status} (Tier: ${tier}).`);
+          
           const { error } = await supabase
             .from('profiles')
             .update({
@@ -174,10 +193,12 @@ export default async function handler(req: any, res: any) {
             .eq('id', profile.id);
 
           if (error) {
-            console.error(`[Stripe Webhook] Error updating profile for ${event.type}: ${error.message}`);
+            console.error(`[Stripe Webhook] DB Update FAILED for user ${profile.id} on subscription event ${event.type}: ${error.message}`);
           } else {
-            console.log(`[Stripe Webhook] Updated user ${profile.id} status to ${status} (tier: ${tier}).`);
+            console.log(`[Stripe Webhook] DB Update SUCCESS: User ${profile.id} profile synchronized with Stripe subscription.`);
           }
+        } else {
+          console.log(`[Stripe Webhook] No user found for subscription event ${event.id}.`);
         }
         break;
       }
@@ -186,9 +207,12 @@ export default async function handler(req: any, res: any) {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
 
+        console.log(`[Stripe Webhook] Processing event: ${event.type} | Subscription: ${subscription.id} | Customer: ${customerId}`);
+
         const profile = await findProfile(customerId, null);
 
         if (profile) {
+          console.log(`[Stripe Webhook] Found user ${profile.id}. Downgrading to free tier due to cancelled subscription.`);
           const { error } = await supabase
             .from('profiles')
             .update({
@@ -201,10 +225,12 @@ export default async function handler(req: any, res: any) {
             .eq('id', profile.id);
 
           if (error) {
-            console.error(`[Stripe Webhook] Error resetting profile on deletion: ${error.message}`);
+            console.error(`[Stripe Webhook] DB Update FAILED for user ${profile.id} on subscription deletion: ${error.message}`);
           } else {
-            console.log(`[Stripe Webhook] Reset user ${profile.id} to free tier.`);
+            console.log(`[Stripe Webhook] DB Update SUCCESS: User ${profile.id} reverted to free tier.`);
           }
+        } else {
+          console.log(`[Stripe Webhook] No user found for subscription deletion ${subscription.id}.`);
         }
         break;
       }
