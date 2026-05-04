@@ -201,14 +201,8 @@ export default function ChatScreen({ navigation }: any) {
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         
-        const pcmData = new Int16Array(bytes.buffer.slice(0, bytes.buffer.byteLength - (bytes.buffer.byteLength % 2)));
-        const float32Data = new Float32Array(pcmData.length);
-        for (let i = 0; i < pcmData.length; i++) {
-          float32Data[i] = pcmData[i] / 32768.0;
-        }
-        
-        const audioBuffer = context.createBuffer(1, float32Data.length, 24000);
-        audioBuffer.getChannelData(0).set(float32Data);
+        // Properly decode the MP3/AAC data from OpenAI
+        const audioBuffer = await context.decodeAudioData(bytes.buffer);
         
         const source = context.createBufferSource();
         source.buffer = audioBuffer;

@@ -8,6 +8,7 @@ import { AlertTriangle } from 'lucide-react';
 // Screens
 import HomeScreen from './screens/HomeScreen';
 import MoodScreen from './screens/MoodScreen';
+import ReflectionScreen from './screens/ReflectionScreen';
 import ChatScreen from './screens/ChatScreen';
 import VoiceScreen from './screens/VoiceScreen';
 import MusicScreen from './screens/MusicScreen';
@@ -156,6 +157,7 @@ function AppContent() {
     switch (currentRoute) {
       case 'Home': return <HomeScreen navigation={nav} />;
       case 'Mood': return <MoodScreen navigation={nav} route={{ params: routeParams }} />;
+      case 'Reflection': return <ReflectionScreen navigation={nav} />;
       case 'Chat': return <ChatScreen navigation={nav} />;
       case 'Voice': return <VoiceScreen navigation={nav} />;
       case 'Music': return <MusicScreen />;
@@ -216,11 +218,10 @@ function AppContent() {
       )}
       <View style={styles.tabBar}>
         <TabButton name="Home" icon={Home} />
-        <TabButton name="Mood" icon={Search} />
+        <TabButton name="Reflection" icon={Search} />
         <TabButton name="Music" icon={Music} />
         <TabButton name="Chat" icon={MessageCircle} />
         <TabButton name="Voice" icon={Mic} />
-        <TabButton name="Profile" icon={User} />
       </View>
     </View>
   );

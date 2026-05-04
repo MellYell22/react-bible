@@ -17,9 +17,33 @@ import { WORSHIP_SONGS } from '../constants/songs';
 
 import { useUser } from '../UserContext';
 
+const GREETINGS_POOL = [
+  "Hey... I'm here. What's going on?",
+  "I'm listening. What's on your heart today?",
+  "Take your time... I'm right here. What's up?",
+  "Hey. How are you holding up inside?",
+  "I'm here. What's been on your mind lately?",
+  "It's good to hear from you. What are you feeling?",
+  "Peace be with you. What's happening in your world?",
+  "I'm all ears... tell me what's going on.",
+  "You seem like you have something to say. I'm listening.",
+  "Hey. What's been the hardest part of your day?",
+  "I'm right here. What's the best thing that happened today?",
+  "Just checking in... what's up with you?",
+  "God is with us. What's weighing on you today?",
+  "I'm listening. Speak your heart to me.",
+  "It's good to talk... what's moving in your spirit?",
+  "I'm right here. Speak when you're ready.",
+  "Hey. What are you carrying in your heart right now?",
+  "I'm ready whenever you are. What's going on?",
+  "You've got a lot on your soul, don't you?",
+  "I'm here to walk with you. What's on your heart today?"
+];
+
 export default function VoiceScreen({ route, navigation }: any) {
   const { playSong, playbackError } = useMusic();
   const { profile } = useUser();
+  const [lastGreetingIndex, setLastGreetingIndex] = useState<number>(-1);
   const moodParam = route?.params?.mood;
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -106,17 +130,27 @@ export default function VoiceScreen({ route, navigation }: any) {
     setIsDavidThinking(false);
     setIsDavidSpeaking(false);
     
-    addLog("Starting OpenAI voice session...");
+    addLog("Starting David voice session...");
     
     try {
       setIsConnected(true);
       setIsConnecting(false);
       
-      // David speaks first
-      const userName = profile?.email?.split('@')[0] || "friend";
-      const initialPrompt = `(System: The session has started. Greet ${userName} warmly and ask how they are feeling right now in a short, conversational way.)`;
+      // Select random greeting
+      let greetingIndex;
+      do {
+        greetingIndex = Math.floor(Math.random() * GREETINGS_POOL.length);
+      } while (greetingIndex === lastGreetingIndex && GREETINGS_POOL.length > 1);
       
-      await handleVoiceInput(initialPrompt, true);
+      setLastGreetingIndex(greetingIndex);
+      const greeting = GREETINGS_POOL[greetingIndex];
+      
+      const assistantGreeting: ChatMessage = { role: 'assistant', content: greeting };
+      setMessages([assistantGreeting]);
+      setLastResponseText(greeting);
+      
+      // Speak the greeting
+      await speakMessage(greeting);
     } catch (err: any) {
       addLog(`Session error: ${err?.message}`);
       setError(`Failed to connect: ${err?.message}`);
@@ -124,13 +158,11 @@ export default function VoiceScreen({ route, navigation }: any) {
     }
   };
 
-  const handleVoiceInput = async (text: string, isInitial = false) => {
+  const handleVoiceInput = async (text: string) => {
     if (!text.trim()) return;
     
     const newUserMessage: ChatMessage = { role: 'user', content: text };
-    if (!isInitial) {
-      setMessages(prev => [...prev, newUserMessage]);
-    }
+    setMessages(prev => [...prev, newUserMessage]);
     
     setIsDavidProcessing(true);
     setIsDavidThinking(true);
@@ -166,7 +198,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       const base64Audio = await generateSpeech(text);
       if (base64Audio) {
         if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         }
         const context = audioContextRef.current;
         if (context.state === 'suspended') {
@@ -177,14 +209,8 @@ export default function VoiceScreen({ route, navigation }: any) {
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         
-        const pcmData = new Int16Array(bytes.buffer.slice(0, bytes.buffer.byteLength - (bytes.buffer.byteLength % 2)));
-        const float32Data = new Float32Array(pcmData.length);
-        for (let i = 0; i < pcmData.length; i++) {
-          float32Data[i] = pcmData[i] / 32768.0;
-        }
-        
-        const audioBuffer = context.createBuffer(1, float32Data.length, 24000);
-        audioBuffer.getChannelData(0).set(float32Data);
+        // Properly decode the MP3/AAC data from OpenAI
+        const audioBuffer = await context.decodeAudioData(bytes.buffer);
         
         const source = context.createBufferSource();
         source.buffer = audioBuffer;
@@ -198,12 +224,14 @@ export default function VoiceScreen({ route, navigation }: any) {
         source.start();
       } else {
         setIsDavidSpeaking(false);
-        startListening();
+        setError("David is having trouble speaking right now. Please try again or check your connection.");
+        addLog("Speech generation returned null");
       }
     } catch (error) {
       console.error("Speech error:", error);
       setIsDavidSpeaking(false);
-      startListening();
+      setError("David's voice encountered an error. Please try again.");
+      addLog(`Speech error: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
