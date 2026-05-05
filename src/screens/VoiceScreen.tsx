@@ -217,8 +217,9 @@ export default function VoiceScreen({ route, navigation }: any) {
         source.connect(context.destination);
         source.onended = () => {
           setIsDavidSpeaking(false);
-          // Start listening again after David finishes speaking
-          startListening();
+          // STOP auto-listening loop to prevent rambling
+          // User must manually press the mic to speak again
+          setIsListening(false);
         };
         currentSourceRef.current = source;
         source.start();
