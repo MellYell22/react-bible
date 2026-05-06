@@ -136,21 +136,12 @@ export default function VoiceScreen({ route, navigation }: any) {
       setIsConnected(true);
       setIsConnecting(false);
       
-      // Select random greeting
-      let greetingIndex;
-      do {
-        greetingIndex = Math.floor(Math.random() * GREETINGS_POOL.length);
-      } while (greetingIndex === lastGreetingIndex && GREETINGS_POOL.length > 1);
+      // Do not auto-greet. Just start listening immediately so the user speaks first.
+      // We set a brief timeout to ensure state has updated before triggering the mic.
+      setTimeout(() => {
+        startListening();
+      }, 100);
       
-      setLastGreetingIndex(greetingIndex);
-      const greeting = GREETINGS_POOL[greetingIndex];
-      
-      const assistantGreeting: ChatMessage = { role: 'assistant', content: greeting };
-      setMessages([assistantGreeting]);
-      setLastResponseText(greeting);
-      
-      // Speak the greeting
-      await speakMessage(greeting);
     } catch (err: any) {
       addLog(`Session error: ${err?.message}`);
       setError(`Failed to connect: ${err?.message}`);

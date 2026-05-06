@@ -55,8 +55,10 @@ export default async function handler(req: any, res: any) {
         text,
         model_id: 'eleven_turbo_v2_5',
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
+          stability: 0.4, // Lower stability for more natural, slightly imperfect speech
+          similarity_boost: 0.75, // Balanced similarity
+          style: 0.1, // Slight style variation for natural pauses
+          use_speaker_boost: true
         },
       }),
     });
