@@ -182,15 +182,7 @@ export const generateSpeech = async (text: string): Promise<string | null> => {
     if (!response.ok) return null;
 
     const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result as string;
-        // Strip data:audio/mpeg;base64,
-        resolve(base64.split(',')[1]);
-      };
-      reader.readAsDataURL(blob);
-    });
+    return URL.createObjectURL(blob);
   } catch (error) {
     console.error("Speech generation error:", error);
     return null;

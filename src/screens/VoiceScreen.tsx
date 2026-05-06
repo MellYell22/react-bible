@@ -186,44 +186,27 @@ export default function VoiceScreen({ route, navigation }: any) {
   const speakMessage = async (text: string) => {
     setIsDavidSpeaking(true);
     try {
-      const base64Audio = await generateSpeech(text);
-      if (base64Audio) {
-        if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
-        const context = audioContextRef.current;
-        if (context.state === 'suspended') {
-          await context.resume();
-        }
-
-        const binary = atob(base64Audio);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        
-        // Properly decode the MP3/AAC data from OpenAI
-        const audioBuffer = await context.decodeAudioData(bytes.buffer);
-        
-        const source = context.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(context.destination);
-        source.onended = () => {
+      const audioUrl = await generateSpeech(text);
+      if (audioUrl) {
+        const audio = new Audio(audioUrl);
+        audio.onended = () => {
           setIsDavidSpeaking(false);
-          // STOP auto-listening loop to prevent rambling
-          // User must manually press the mic to speak again
           setIsListening(false);
+          URL.revokeObjectURL(audioUrl); // Clean up memory
         };
-        currentSourceRef.current = source;
-        source.start();
+        audio.onerror = () => {
+          setIsDavidSpeaking(false);
+          setError("David's voice encountered a playback error.");
+        };
+        await audio.play();
       } else {
         setIsDavidSpeaking(false);
-        setError("David is having trouble speaking right now. Please try again or check your connection.");
-        addLog("Speech generation returned null");
+        setError("David is having trouble speaking right now.");
       }
     } catch (error) {
       console.error("Speech error:", error);
       setIsDavidSpeaking(false);
-      setError("David's voice encountered an error. Please try again.");
-      addLog(`Speech error: ${error instanceof Error ? error.message : String(error)}`);
+      setError("David's voice encountered an error.");
     }
   };
 

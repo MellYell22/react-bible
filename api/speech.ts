@@ -40,7 +40,7 @@ export default async function handler(req: any, res: any) {
     
     console.log(`[Speech API] Using Voice ID: ${voiceId}`);
 
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?optimize_streaming_latency=3`;
     console.log(`[Speech API] Calling ElevenLabs: ${url}`);
 
     // 3. Make the API call
