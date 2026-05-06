@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, ScrollView, TextInput } from 'react-native';
 import { Mic, MicOff, Lock, Sparkles, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { motion, AnimatePresence } from "motion/react";
 
@@ -42,14 +42,20 @@ export default function VoiceScreen({ route, navigation }: any) {
   const [lastResponseText, setLastResponseText] = useState<string | null>(null);
   const [messages, setMessages]             = useState<ChatMessage[]>([]);
   const [lastFeedback, setLastFeedback]     = useState<'up' | 'down' | null>(null);
+  // Text fallback when speech recognition fails
+  const [textInput, setTextInput]           = useState('');
+  const [showTextFallback, setShowTextFallback] = useState(false);
+  const [micErrorCount, setMicErrorCount]   = useState(0);
 
   // ── Refs (never stale inside callbacks) ──────────────────────────────────
   const recognitionRef      = useRef<any>(null);
   const currentAudioRef     = useRef<HTMLAudioElement | null>(null);
   const isConnectedRef      = useRef(false);
   const isDavidSpeakingRef  = useRef(false);
-  // audioContextRef kept for potential future AudioContext usage
   const audioContextRef     = useRef<AudioContext | null>(null);
+  // Retry tracking for speech recognition network errors
+  const micRetryCountRef    = useRef(0);
+  const MAX_MIC_RETRIES     = 5;
 
   // ── Logging helper (also pushes to on-screen debug panel) ────────────────
   const addLog = (msg: string) => {
@@ -323,6 +329,12 @@ export default function VoiceScreen({ route, navigation }: any) {
       log('Microphone activated — listening');
       setIsListening(true);
       addLog('Listening…');
+      // Clear network error message once mic starts successfully after retries
+      if (micRetryCountRef.current > 0) {
+        micRetryCountRef.current = 0;
+        setMicErrorCount(0);
+        setError(null);
+      }
     };
 
     recognition.onresult = (event: any) => {
@@ -334,12 +346,70 @@ export default function VoiceScreen({ route, navigation }: any) {
     };
 
     recognition.onerror = (event: any) => {
-      log('Speech recognition error', event.error);
-      addLog(`Mic error: ${event.error}`);
+      const errCode: string = event.error;
+      log('Speech recognition error', errCode);
       setIsListening(false);
-      // 'no-speech' is normal — user didn't say anything. Restart silently.
-      if (event.error === 'no-speech' && isConnectedRef.current) {
+
+      if (!isConnectedRef.current) return;
+
+      if (errCode === 'no-speech') {
+        // Normal — user was quiet. Reset retry counter and listen again.
+        micRetryCountRef.current = 0;
         setTimeout(() => startListening(), 300);
+        return;
+      }
+
+      if (errCode === 'aborted') {
+        // We stopped it ourselves — do nothing.
+        return;
+      }
+
+      // For network, audio-capture, service-not-allowed, not-allowed:
+      micRetryCountRef.current += 1;
+      setMicErrorCount(micRetryCountRef.current);
+      const retryNum = micRetryCountRef.current;
+
+      if (errCode === 'not-allowed') {
+        // User denied mic permission — show text fallback immediately.
+        log('Mic permission denied — switching to text fallback');
+        addLog('Mic permission denied. Use the text box below to talk to David.');
+        setError('Microphone access was denied. Type your message below instead.');
+        setShowTextFallback(true);
+        return;
+      }
+
+      if (errCode === 'network') {
+        if (retryNum <= MAX_MIC_RETRIES) {
+          // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+          const delay = Math.min(1000 * Math.pow(2, retryNum - 1), 16000);
+          log(`Network error — retry ${retryNum}/${MAX_MIC_RETRIES} in ${delay}ms`);
+          addLog(`Mic network error (attempt ${retryNum}/${MAX_MIC_RETRIES}) — retrying in ${Math.round(delay/1000)}s…`);
+          setError(`Speech recognition network issue. Retrying… (${retryNum}/${MAX_MIC_RETRIES})`);
+          setTimeout(() => {
+            if (isConnectedRef.current) startListening();
+          }, delay);
+        } else {
+          log('Network error — max retries reached, switching to text fallback');
+          addLog('Speech recognition unavailable. Switched to text input.');
+          setError('Speech recognition is unavailable. Type your message below.');
+          setShowTextFallback(true);
+        }
+        return;
+      }
+
+      // All other errors (audio-capture, service-not-allowed, etc.)
+      if (retryNum <= 2) {
+        const delay = 1500 * retryNum;
+        log(`Recognition error (${errCode}) — retry ${retryNum}/2 in ${delay}ms`);
+        addLog(`Mic error: ${errCode} — retrying…`);
+        setTimeout(() => {
+          if (isConnectedRef.current) startListening();
+        }, delay);
+      } else {
+        log(`Recognition error (${errCode}) — switching to text fallback`);
+        addLog(`Mic unavailable (${errCode}). Use text input below.`);
+        setError('Microphone unavailable. Type your message below.');
+        setShowTextFallback(true);
       }
     };
 
@@ -359,7 +429,16 @@ export default function VoiceScreen({ route, navigation }: any) {
     }
   };
 
-  // ── Stop session ──────────────────────────────────────────────────────────
+  // ── Text fallback submit ──────────────────────────────────────────
+  const handleTextSubmit = () => {
+    const trimmed = textInput.trim();
+    if (!trimmed || !isConnectedRef.current) return;
+    log('Text input submitted', trimmed);
+    setTextInput('');
+    handleVoiceInput(trimmed);
+  };
+
+  // ── Stop session ──────────────────────────────────────────────
   const stopSession = () => {
     log('Session ended by user');
     isConnectedRef.current = false;
@@ -378,6 +457,11 @@ export default function VoiceScreen({ route, navigation }: any) {
     setIsListening(false);
     setIsDavidSpeaking(false);
     setIsDavidThinking(false);
+    // Reset text fallback state
+    micRetryCountRef.current = 0;
+    setMicErrorCount(0);
+    setShowTextFallback(false);
+    setTextInput('');
   };
 
   // ── Feedback ──────────────────────────────────────────────────────────────
@@ -515,6 +599,45 @@ export default function VoiceScreen({ route, navigation }: any) {
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
+      {/* Text input fallback — shown when speech recognition fails */}
+      {isConnected && showTextFallback && (
+        <View style={styles.textInputContainer}>
+          <Text style={styles.textInputLabel}>Type your message to David</Text>
+          <View style={styles.textInputRow}>
+            <TextInput
+              style={styles.textInputField}
+              value={textInput}
+              onChangeText={setTextInput}
+              placeholder="What’s on your mind…"
+              placeholderTextColor="rgba(212, 175, 55, 0.4)"
+              onSubmitEditing={handleTextSubmit}
+              returnKeyType="send"
+              editable={!isDavidThinking && !isDavidSpeaking}
+              multiline={false}
+            />
+            <TouchableOpacity
+              style={[styles.textSendButton, (!textInput.trim() || isDavidThinking) && styles.textSendButtonDisabled]}
+              onPress={handleTextSubmit}
+              disabled={!textInput.trim() || isDavidThinking || isDavidSpeaking}
+            >
+              <Text style={styles.textSendButtonText}>Send</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={{ marginTop: 8 }}
+            onPress={() => {
+              setShowTextFallback(false);
+              micRetryCountRef.current = 0;
+              setMicErrorCount(0);
+              setError(null);
+              if (isConnectedRef.current) startListening();
+            }}
+          >
+            <Text style={styles.retryMicText}>Try microphone again</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -826,5 +949,62 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  // Text input fallback styles
+  textInputContainer: {
+    width: '100%',
+    backgroundColor: 'rgba(15, 42, 82, 0.7)',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.4)',
+  },
+  textInputLabel: {
+    color: '#d4af37',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  textInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  textInputField: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.3)',
+  },
+  textSendButton: {
+    backgroundColor: '#d4af37',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  textSendButtonDisabled: {
+    backgroundColor: 'rgba(212, 175, 55, 0.3)',
+  },
+  textSendButtonText: {
+    color: '#0b1e3d',
+    fontWeight: 'bold',
+    fontSize: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  retryMicText: {
+    color: 'rgba(212, 175, 55, 0.6)',
+    fontSize: 11,
+    textDecorationLine: 'underline',
+    textAlign: 'center',
+    marginTop: 4,
   },
 });
