@@ -1,103 +1,85 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, ScrollView } from 'react-native';
 import { Mic, MicOff, Lock, Sparkles, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { motion, AnimatePresence } from "motion/react";
-import { supabase } from '../services/supabase';
 
 const MotionView = motion(View);
-import { Profile, ResponseLength, ChatMessage } from '../types';
+import { ChatMessage } from '../types';
 import { getChatResponse, generateSpeech } from '../services/ai';
 import { hasProAccess } from '../utils/tier';
 import { useMusic } from '../MusicContext';
-import { findSong, extractSongTitle, openYouTubeSearch } from '../utils/music';
 import { saveAIFeedback } from '../services/supabase';
-
-import { MOODS_DATA } from '../constants/moods';
-import { WORSHIP_SONGS } from '../constants/songs';
-
 import { useUser } from '../UserContext';
 
-const GREETINGS_POOL = [
-  "Hey, I’m David. I’m glad you’re here.",
-  "Hey there. What would you like to talk about today?",
-  "I’m here with you. What’s on your mind?",
-  "Hi, I’m David. You can talk to me about anything.",
-  "Hey. Would you like scripture, encouragement, music, or just a conversation?",
-  "Hi! How’s your day going so far?",
-  "Hey. I'm David. What can I do for you today?",
-  "I'm here for whatever you need—scripture, music, or just to talk.",
-  "Hey. I’m glad we could connect. What’s up?",
-  "Hello. I’m David. What’s on your heart today?",
-  "Hey! I'm David. I'm here to listen whenever you're ready.",
-  "Hi there. Is there anything specific you'd like to dive into today?",
-  "Hey! It's good to talk. What's on your mind?",
-  "Hi, I’m David. I’m here for support, scripture, or just to chat.",
-  "Hey. I was hoping we'd talk today. What's going on?",
-  "Hello! I'm David. What can we explore together right now?",
-  "Hey. I'm ready for whatever you want to talk about.",
-  "Hi! I'm David. It's a pleasure to be here with you.",
-  "Hey. What's the latest in your world today?",
-  "Hi there. I'm David. What's your focus for our conversation?"
-];
+// ─── Logging ────────────────────────────────────────────────────────────────
+// All voice events are prefixed with [David] for easy filtering in DevTools.
+const log = (event: string, detail?: any) => {
+  const msg = detail !== undefined
+    ? `[David] ${event}: ${typeof detail === 'object' ? JSON.stringify(detail) : detail}`
+    : `[David] ${event}`;
+  console.log(msg);
+  return msg;
+};
+
+// ─── David personality prompt ────────────────────────────────────────────────
+// Kept here as a reference — the authoritative copy lives in api/chat.ts (Vercel)
+// and server.ts (local dev). Both are kept in sync.
 
 export default function VoiceScreen({ route, navigation }: any) {
-  const { playSong, playbackError } = useMusic();
+  const { playbackError } = useMusic();
   const { profile } = useUser();
-  const [lastGreetingIndex, setLastGreetingIndex] = useState<number>(-1);
-  const moodParam = route?.params?.mood;
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isListening, setIsListening] = useState(false);
+
+  // ── UI state ──────────────────────────────────────────────────────────────
+  const [isConnecting, setIsConnecting]     = useState(false);
+  const [isConnected, setIsConnected]       = useState(false);
+  const [isListening, setIsListening]       = useState(false);
   const [isDavidThinking, setIsDavidThinking] = useState(false);
   const [isDavidSpeaking, setIsDavidSpeaking] = useState(false);
-  const [hasKey, setHasKey] = useState(true);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [showDebug, setShowDebug] = useState(false);
+  const [hasKey, setHasKey]                 = useState(true);
+  const [debugLogs, setDebugLogs]           = useState<string[]>([]);
+  const [error, setError]                   = useState<string | null>(null);
+  const [showDebug, setShowDebug]           = useState(false);
   const [lastResponseText, setLastResponseText] = useState<string | null>(null);
-  const [isDavidProcessing, setIsDavidProcessing] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [currentDavidResponse, setCurrentDavidResponse] = useState("");
-  const [lastFeedback, setLastFeedback] = useState<'up' | 'down' | null>(null);
-  
-  const recognitionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const isConnectedRef = useRef(false);
-  const isDavidSpeakingRef = useRef(false);
+  const [messages, setMessages]             = useState<ChatMessage[]>([]);
+  const [lastFeedback, setLastFeedback]     = useState<'up' | 'down' | null>(null);
 
+  // ── Refs (never stale inside callbacks) ──────────────────────────────────
+  const recognitionRef      = useRef<any>(null);
+  const currentAudioRef     = useRef<HTMLAudioElement | null>(null);
+  const isConnectedRef      = useRef(false);
+  const isDavidSpeakingRef  = useRef(false);
+  // audioContextRef kept for potential future AudioContext usage
+  const audioContextRef     = useRef<AudioContext | null>(null);
+
+  // ── Logging helper (also pushes to on-screen debug panel) ────────────────
   const addLog = (msg: string) => {
-    console.log(`[VoiceDebug] ${msg}`);
-    setDebugLogs(prev => [msg, ...prev].slice(0, 20));
+    const full = log(msg);
+    setDebugLogs(prev => [full, ...prev].slice(0, 30));
   };
 
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
   useEffect(() => {
     checkApiKey();
-    return () => {
-      stopSession();
-    };
+    return () => { stopSession(); };
   }, []);
 
   useEffect(() => {
     if (playbackError && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.role === 'assistant' && (lastMessage.content.includes("Playing") || lastMessage.content.includes("putting on"))) {
+      const last = messages[messages.length - 1];
+      if (last.role === 'assistant' && (last.content.includes("Playing") || last.content.includes("putting on"))) {
         setMessages(prev => {
-          const newMessages = [...prev];
-          const lastIdx = newMessages.length - 1;
-          if (!newMessages[lastIdx].content.includes("playback did not start")) {
-            newMessages[lastIdx] = { 
-              ...newMessages[lastIdx], 
-              content: newMessages[lastIdx].content + "\n\nI found the song, but playback did not start. Let me try another way." 
-            };
+          const arr = [...prev];
+          const i = arr.length - 1;
+          if (!arr[i].content.includes("playback did not start")) {
+            arr[i] = { ...arr[i], content: arr[i].content + "\n\nI found the song, but playback did not start. Let me try another way." };
           }
-          return newMessages;
+          return arr;
         });
       }
     }
   }, [playbackError]);
 
+  // ── API key check (AI Studio env only) ───────────────────────────────────
   const checkApiKey = async () => {
     if ((window as any).aistudio) {
       const selected = await (window as any).aistudio.hasSelectedApiKey();
@@ -112,221 +94,310 @@ export default function VoiceScreen({ route, navigation }: any) {
     }
   };
 
-  const getAudioContext = (sampleRate = 24000) => {
-    if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate });
-      addLog(`AudioContext created (${sampleRate}Hz)`);
+  // ── Mobile autoplay unlock ────────────────────────────────────────────────
+  // iOS Safari and some Android browsers block audio.play() unless triggered
+  // directly inside a user-gesture handler. We prime a silent AudioContext on
+  // the first user tap so subsequent programmatic play() calls are allowed.
+  const unlockAudioContext = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new AudioCtx();
+        addLog('AudioContext unlocked for mobile autoplay');
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().then(() => addLog('AudioContext resumed'));
+      }
+    } catch (e) {
+      addLog(`AudioContext unlock error: ${e}`);
     }
-    return audioContextRef.current;
   };
 
+  // ── Start session ─────────────────────────────────────────────────────────
+  // Pressing "Start Conversation" ONLY activates the microphone.
+  // David does NOT speak first — he waits for the user.
   const startSession = async () => {
+    log('Talk button pressed');
+
     if (!hasProAccess(profile)) {
       alert('Voice chat is a Pro feature. Please upgrade to access.');
       return;
     }
 
+    // Unlock audio on this user gesture so play() works on mobile
+    unlockAudioContext();
+
     setIsConnecting(true);
     setMessages([]);
     setError(null);
-    setIsDavidProcessing(false);
     setIsDavidThinking(false);
     setIsDavidSpeaking(false);
-    
-    addLog("Starting David voice session...");
-    
+    isDavidSpeakingRef.current = false;
+
+    addLog('Starting David voice session — mic only, no auto-greeting');
+
     try {
       isConnectedRef.current = true;
       setIsConnected(true);
       setIsConnecting(false);
-      
-      // Do not auto-greet. Just start listening immediately so the user speaks first.
-      // We set a brief timeout to ensure state has updated before triggering the mic.
+
+      // Small delay to let React flush state before starting the mic
       setTimeout(() => {
+        log('Mic activation triggered after session start');
         startListening();
-      }, 100);
-      
+      }, 150);
+
     } catch (err: any) {
-      addLog(`Session error: ${err?.message}`);
-      setError(`Failed to connect: ${err?.message}`);
+      addLog(`Session start error: ${err?.message}`);
+      setError(`Failed to start: ${err?.message}`);
       setIsConnecting(false);
+      isConnectedRef.current = false;
     }
   };
 
+  // ── Handle voice input (transcript → AI → TTS) ────────────────────────────
   const handleVoiceInput = async (text: string) => {
-    if (!text.trim()) return;
-    
+    if (!text.trim()) {
+      addLog('Empty transcript — ignoring');
+      return;
+    }
+
+    log('Transcript received', text);
+
     const newUserMessage: ChatMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, newUserMessage]);
-    
-    setIsDavidProcessing(true);
     setIsDavidThinking(true);
-    
+
     try {
-      const history = messages.map(m => ({ 
-        role: m.role, 
-        content: m.content 
-      }));
-      
-      // Add the new message to history for the API call
-      history.push(newUserMessage);
-      
+      const history = [
+        ...messages.map(m => ({ role: m.role, content: m.content })),
+        newUserMessage,
+      ];
+
+      log('AI request sent', `history length: ${history.length}`);
       const response = await getChatResponse(history, profile?.preferred_response_length || 'short');
-      
+      log('AI response received', response.substring(0, 80) + (response.length > 80 ? '…' : ''));
+
       setIsDavidThinking(false);
-      setIsDavidProcessing(false);
       setLastResponseText(response);
       setMessages(prev => [...prev, { role: 'assistant', content: response }]);
-      
-      // Speak the response
+
       await speakMessage(response);
+
     } catch (err: any) {
-      addLog(`Chat error: ${err?.message}`);
+      addLog(`AI chat error: ${err?.message}`);
       setIsDavidThinking(false);
-      setIsDavidProcessing(false);
+      // Restart listening even after AI error so the session stays alive
+      if (isConnectedRef.current) {
+        setTimeout(() => startListening(), 500);
+      }
     }
   };
 
+  // ── Text-to-speech ────────────────────────────────────────────────────────
   const speakMessage = async (text: string) => {
-    isDavidSpeakingRef.current = true;
-    setIsDavidSpeaking(true);
-    // Stop any currently playing audio
+    // Stop any audio that might still be playing
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
     }
+
+    isDavidSpeakingRef.current = true;
+    setIsDavidSpeaking(true);
+    setError(null);
+
+    log('TTS request sent', `${text.length} chars`);
+
     try {
       const audioUrl = await generateSpeech(text);
-      if (audioUrl) {
-        const audio = new Audio(audioUrl);
-        currentAudioRef.current = audio;
-        audio.onended = () => {
-          isDavidSpeakingRef.current = false;
-          setIsDavidSpeaking(false);
-          URL.revokeObjectURL(audioUrl); // Clean up memory
-          currentAudioRef.current = null;
-          // Restart listening after David finishes speaking
-          if (isConnectedRef.current) {
-            setTimeout(() => startListening(), 300);
-          }
-        };
-        audio.onerror = (e) => {
-          console.error('[VoiceScreen] Audio playback error:', e);
-          isDavidSpeakingRef.current = false;
-          setIsDavidSpeaking(false);
-          currentAudioRef.current = null;
-          setError("David's voice encountered a playback error.");
-          // Still restart listening even on error
-          if (isConnectedRef.current) {
-            setTimeout(() => startListening(), 300);
-          }
-        };
-        await audio.play();
-      } else {
+
+      if (!audioUrl) {
+        log('TTS returned null — no audio URL');
+        addLog('TTS failed: no audio URL returned from /api/speech');
         isDavidSpeakingRef.current = false;
         setIsDavidSpeaking(false);
-        setError("David is having trouble speaking right now.");
-        // Restart listening even if speech generation failed
+        setError("David's voice is unavailable right now. Check the ElevenLabs API key.");
+        if (isConnectedRef.current) setTimeout(() => startListening(), 500);
+        return;
+      }
+
+      log('Audio URL returned', audioUrl.substring(0, 40) + '…');
+
+      const audio = new Audio(audioUrl);
+      currentAudioRef.current = audio;
+
+      // Preload so mobile browsers have the data before play()
+      audio.preload = 'auto';
+
+      audio.oncanplaythrough = () => {
+        log('Audio canplaythrough — ready to play');
+      };
+
+      audio.onplay = () => {
+        log('Audio playback started');
+        addLog('David is speaking…');
+      };
+
+      audio.onended = () => {
+        log('Audio playback ended — restarting mic');
+        isDavidSpeakingRef.current = false;
+        setIsDavidSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
         if (isConnectedRef.current) {
           setTimeout(() => startListening(), 300);
         }
+      };
+
+      audio.onerror = (e) => {
+        const errMsg = (e as any)?.message || 'unknown';
+        log('Audio playback error', errMsg);
+        addLog(`Audio playback failed: ${errMsg}`);
+        isDavidSpeakingRef.current = false;
+        setIsDavidSpeaking(false);
+        currentAudioRef.current = null;
+        setError("Audio playback failed. This may be a browser autoplay restriction.");
+        if (isConnectedRef.current) setTimeout(() => startListening(), 500);
+      };
+
+      log('Calling audio.play()');
+      // play() returns a Promise — catch rejection (autoplay policy)
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((playErr: any) => {
+          log('audio.play() rejected (autoplay policy?)', playErr?.message);
+          addLog(`audio.play() blocked: ${playErr?.message}. Try tapping the screen first.`);
+          isDavidSpeakingRef.current = false;
+          setIsDavidSpeaking(false);
+          currentAudioRef.current = null;
+          setError("Autoplay blocked. Tap anywhere on the screen and try again.");
+          if (isConnectedRef.current) setTimeout(() => startListening(), 500);
+        });
       }
-    } catch (error) {
-      console.error("Speech error:", error);
+
+    } catch (err: any) {
+      log('speakMessage exception', err?.message);
+      addLog(`TTS exception: ${err?.message}`);
       isDavidSpeakingRef.current = false;
       setIsDavidSpeaking(false);
-      setError("David's voice encountered an error.");
-      // Restart listening even on exception
-      if (isConnectedRef.current) {
-        setTimeout(() => startListening(), 300);
-      }
+      setError("David's voice encountered an unexpected error.");
+      if (isConnectedRef.current) setTimeout(() => startListening(), 500);
     }
   };
 
+  // ── Speech recognition ────────────────────────────────────────────────────
   const startListening = () => {
-    if (isDavidSpeakingRef.current || !isConnectedRef.current) return;
-    
-    // @ts-ignore
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      addLog("SpeechRecognition not supported in this browser.");
+    // Guard with refs (never stale inside callbacks)
+    if (isDavidSpeakingRef.current) {
+      log('startListening blocked — David is still speaking');
+      return;
+    }
+    if (!isConnectedRef.current) {
+      log('startListening blocked — session not connected');
       return;
     }
 
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      addLog('SpeechRecognition not supported in this browser');
+      setError('Voice input is not supported in this browser. Try Chrome or Edge.');
+      return;
+    }
+
+    // Stop any existing recognition instance cleanly
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch(e) {}
+      try { recognitionRef.current.stop(); } catch (e) {}
     }
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
+    // continuous = false: fires onresult once per utterance, then stops.
+    // This is intentional — we restart after each David response.
+    recognition.continuous = false;
 
     recognition.onstart = () => {
+      log('Microphone activated — listening');
       setIsListening(true);
-      addLog("Started listening...");
+      addLog('Listening…');
     };
 
     recognition.onresult = (event: any) => {
-      const text = event.results[0][0].transcript;
-      addLog(`Heard: "${text}"`);
-      handleVoiceInput(text);
+      const transcript = event.results[0][0].transcript;
+      const confidence = event.results[0][0].confidence;
+      log('Transcript received', `"${transcript}" (confidence: ${(confidence * 100).toFixed(0)}%)`);
+      setIsListening(false);
+      handleVoiceInput(transcript);
     };
 
     recognition.onerror = (event: any) => {
-      addLog(`Recognition error: ${event.error}`);
+      log('Speech recognition error', event.error);
+      addLog(`Mic error: ${event.error}`);
       setIsListening(false);
+      // 'no-speech' is normal — user didn't say anything. Restart silently.
+      if (event.error === 'no-speech' && isConnectedRef.current) {
+        setTimeout(() => startListening(), 300);
+      }
     };
 
     recognition.onend = () => {
+      log('Speech recognition ended');
       setIsListening(false);
-      addLog("Listening ended.");
     };
 
     recognitionRef.current = recognition;
-    recognition.start();
+
+    try {
+      recognition.start();
+      log('recognition.start() called');
+    } catch (e: any) {
+      log('recognition.start() threw', e?.message);
+      addLog(`Could not start mic: ${e?.message}`);
+    }
   };
 
+  // ── Stop session ──────────────────────────────────────────────────────────
   const stopSession = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch(e) {}
-    }
-    if (currentAudioRef.current) {
-      try { currentAudioRef.current.pause(); } catch(e) {}
-      currentAudioRef.current = null;
-    }
+    log('Session ended by user');
     isConnectedRef.current = false;
     isDavidSpeakingRef.current = false;
+
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+      recognitionRef.current = null;
+    }
+    if (currentAudioRef.current) {
+      try { currentAudioRef.current.pause(); } catch (e) {}
+      currentAudioRef.current = null;
+    }
+
     setIsConnected(false);
     setIsListening(false);
     setIsDavidSpeaking(false);
     setIsDavidThinking(false);
   };
 
+  // ── Feedback ──────────────────────────────────────────────────────────────
   const handleFeedback = async (index: number | 'last', type: 'up' | 'down') => {
     const isHelpful = type === 'up';
-    
     if (index === 'last') {
       if (!lastResponseText || !profile) return;
       setLastFeedback(type);
       await saveAIFeedback(profile.id, 'chat', lastResponseText, isHelpful);
     } else {
-      const message = messages[index];
+      const message = messages[index as number];
       if (!message || message.role !== 'assistant' || !profile) return;
-
-      setMessages(prev => prev.map((msg, i) => 
+      setMessages(prev => prev.map((msg, i) =>
         i === index ? { ...msg, feedback: msg.feedback === type ? undefined : type } : msg
       ));
-
       await saveAIFeedback(profile.id, 'chat', message.content, isHelpful);
     }
   };
 
-  // Recognition was moved to startListening
-
+  // ── Locked screen (non-Pro) ───────────────────────────────────────────────
   if (!hasProAccess(profile)) {
     return (
       <View style={styles.lockedContainer}>
@@ -336,8 +407,8 @@ export default function VoiceScreen({ route, navigation }: any) {
           <Text style={styles.lockText}>
             Upgrade to Pro to experience real-time voice conversations with David.
           </Text>
-          <TouchableOpacity 
-            style={styles.upgradeButton} 
+          <TouchableOpacity
+            style={styles.upgradeButton}
             onPress={() => navigation.navigate('Profile')}
           >
             <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
@@ -347,6 +418,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     );
   }
 
+  // ── Main render ───────────────────────────────────────────────────────────
   return (
     <ScrollView style={styles.outerContainer} contentContainerStyle={styles.container}>
       <View style={styles.header}>
@@ -355,19 +427,20 @@ export default function VoiceScreen({ route, navigation }: any) {
         <Text style={styles.subtitle}>Real-time Spiritual Companion</Text>
       </View>
 
+      {/* Visualizer */}
       <View style={styles.visualizerContainer}>
         <AnimatePresence>
           {isConnected && (
             <MotionView
               initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ 
+              animate={{
                 scale: isDavidSpeaking ? [1, 1.4, 1] : isListening ? [1, 1.15, 1] : 1,
                 opacity: isDavidSpeaking ? [0.4, 0.7, 0.4] : isListening ? [0.2, 0.5, 0.2] : 0.1,
               }}
-              transition={{ 
-                duration: isDavidSpeaking ? 0.8 : 2, 
+              transition={{
+                duration: isDavidSpeaking ? 0.8 : 2,
                 repeat: Infinity,
-                ease: "easeInOut" 
+                ease: "easeInOut"
               }}
               style={{
                 position: 'absolute',
@@ -380,7 +453,7 @@ export default function VoiceScreen({ route, navigation }: any) {
             />
           )}
         </AnimatePresence>
-        
+
         <View style={[styles.mainCircle, isConnected && styles.mainActive]}>
           {isConnected ? (
             isDavidSpeaking ? (
@@ -390,8 +463,10 @@ export default function VoiceScreen({ route, navigation }: any) {
               >
                 <Sparkles color="#d4af37" size={56} />
               </MotionView>
+            ) : isDavidThinking ? (
+              <ActivityIndicator color="#d4af37" size="large" />
             ) : (
-              <Mic color="#fff" size={56} />
+              <Mic color={isListening ? '#d4af37' : '#fff'} size={56} />
             )
           ) : (
             <MicOff color="#9CA3AF" size={56} />
@@ -399,12 +474,24 @@ export default function VoiceScreen({ route, navigation }: any) {
         </View>
       </View>
 
-      {/* Status text removed for seamless UX */}
+      {/* Status label */}
+      {isConnected && (
+        <View style={styles.statusContainer}>
+          <Text style={styles.statusText}>
+            {isDavidSpeaking
+              ? 'David is speaking…'
+              : isDavidThinking
+              ? 'David is thinking…'
+              : isListening
+              ? 'Listening…'
+              : 'Tap the mic or speak'}
+          </Text>
+        </View>
+      )}
 
-      {/* Chat transcript removed for seamless voice-first UX */}
-
-      {lastResponseText && lastResponseText.trim().length > 0 && isConnected && !messages.length && (!currentDavidResponse || currentDavidResponse.trim().length === 0) && (
-        <MotionView 
+      {/* Last David response (text fallback) */}
+      {lastResponseText && lastResponseText.trim().length > 0 && isConnected && (
+        <MotionView
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           style={styles.textFallbackContainer}
@@ -424,33 +511,62 @@ export default function VoiceScreen({ route, navigation }: any) {
         </MotionView>
       )}
 
+      {/* Error banner */}
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
 
+      {/* API key warning */}
       {!hasKey && (
         <TouchableOpacity style={styles.keyWarning} onPress={handleOpenKeySelector}>
           <Text style={styles.keyWarningText}>⚠️ API Key Setup Required (Tap here)</Text>
         </TouchableOpacity>
       )}
 
-      <TouchableOpacity 
-        style={[styles.actionButton, isConnected ? styles.stopButton : styles.startButton]} 
+      {/* Main action button */}
+      <TouchableOpacity
+        style={[styles.actionButton, isConnected ? styles.stopButton : styles.startButton]}
         onPress={isConnected ? stopSession : startSession}
         disabled={isConnecting}
       >
         {isConnecting ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.actionButtonText}>{isConnected ? "End Session" : "Start Conversation"}</Text>
+          <Text style={styles.actionButtonText}>
+            {isConnected ? 'End Session' : 'Start Conversation'}
+          </Text>
         )}
       </TouchableOpacity>
 
       <Text style={styles.disclaimer}>
         David is an AI spiritual companion. For professional guidance or pastoral care, please consult your local church or a qualified advisor.
       </Text>
+
+      {/* Debug panel toggle */}
+      <TouchableOpacity
+        style={styles.debugToggleContainer}
+        onPress={() => setShowDebug(v => !v)}
+      >
+        <Text style={styles.debugToggleText}>{showDebug ? 'Hide Debug' : 'Show Debug'}</Text>
+      </TouchableOpacity>
+
+      {showDebug && (
+        <View style={styles.debugPanel}>
+          <View style={styles.debugHeader}>
+            <Text style={styles.debugTitle}>Voice Debug Log</Text>
+            <TouchableOpacity onPress={() => setDebugLogs([])}>
+              <Text style={styles.debugClear}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.debugScroll}>
+            {debugLogs.map((l, i) => (
+              <Text key={i} style={styles.debugLog}>{l}</Text>
+            ))}
+          </ScrollView>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -486,55 +602,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  connectionIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 15,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(212, 175, 55, 0.2)',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  dotConnected: {
-    backgroundColor: '#4ade80',
-    shadowColor: '#4ade80',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-  },
-  dotConnecting: {
-    backgroundColor: '#f5d77a',
-    shadowColor: '#f5d77a',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-  },
-  dotDisconnected: {
-    backgroundColor: '#9CA3AF',
-  },
-  connectionText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  textConnected: {
-    color: '#4ade80',
-  },
-  textConnecting: {
-    color: '#f5d77a',
-  },
-  textDisconnected: {
-    color: '#9CA3AF',
-  },
   visualizerContainer: {
     width: 200,
     height: 200,
@@ -557,28 +624,55 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f2a52',
     borderColor: '#f5d77a',
   },
-  pulseCircle: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(212, 175, 55, 0.1)',
-    zIndex: 1,
-  },
-  pulseActive: {
-    // In a real app we'd animate this
-    transform: [{ scale: 1.2 }],
-    opacity: 0.5,
-  },
   statusContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   statusText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#f5d77a',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    textAlign: 'center',
+  },
+  textFallbackContainer: {
+    backgroundColor: 'rgba(15, 42, 82, 0.6)',
+    padding: 15,
+    borderRadius: 16,
+    marginBottom: 20,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.3)',
+  },
+  textFallbackLabel: {
+    color: '#d4af37',
+    fontSize: 10,
     fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 1,
+    marginBottom: 5,
+  },
+  textFallbackContent: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 20,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  errorBanner: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 20,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: '600',
   },
   keyWarning: {
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -632,103 +726,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  chatContainer: {
-    width: '100%',
-    height: 200,
-    backgroundColor: 'rgba(15, 42, 82, 0.4)',
-    borderRadius: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(212, 175, 55, 0.2)',
-    overflow: 'hidden',
-  },
-  chatScroll: {
-    flex: 1,
-  },
-  chatContent: {
-    padding: 12,
-  },
-  messageBubble: {
-    marginBottom: 12,
-    padding: 10,
-    borderRadius: 12,
-    maxWidth: '90%',
-  },
-  userBubble: {
-    alignSelf: 'flex-end',
-    backgroundColor: 'rgba(212, 175, 55, 0.15)',
-    borderBottomRightRadius: 2,
-  },
-  davidBubble: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(15, 42, 82, 0.8)',
-    borderBottomLeftRadius: 2,
-    borderWidth: 1,
-    borderColor: 'rgba(212, 175, 55, 0.3)',
-  },
-  messageLabel: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#d4af37',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-    letterSpacing: 1,
-  },
-  messageText: {
-    color: '#fff',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  testButton: {
-    marginTop: 15,
-    padding: 10,
-  },
-  testButtonText: {
-    color: '#f5d77a',
-    fontSize: 10,
-    textDecorationLine: 'underline',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  errorBanner: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 20,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#ef4444',
-  },
-  errorText: {
-    color: '#ef4444',
-    fontSize: 12,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  textFallbackContainer: {
-    backgroundColor: 'rgba(15, 42, 82, 0.6)',
-    padding: 15,
-    borderRadius: 16,
-    marginBottom: 20,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: 'rgba(212, 175, 55, 0.3)',
-  },
-  textFallbackLabel: {
-    color: '#d4af37',
-    fontSize: 10,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 5,
-  },
-  textFallbackContent: {
-    color: '#fff',
-    fontSize: 14,
-    lineHeight: 20,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
   debugToggleContainer: {
     marginTop: 20,
   },
@@ -740,7 +737,7 @@ const styles = StyleSheet.create({
   },
   debugPanel: {
     width: '100%',
-    maxHeight: 200,
+    maxHeight: 220,
     backgroundColor: 'rgba(0, 0, 0, 0.9)',
     padding: 12,
     borderRadius: 12,
@@ -757,18 +754,18 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(212, 175, 55, 0.3)',
     paddingBottom: 4,
   },
-  debugClear: {
-    color: '#ef4444',
-    fontSize: 10,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-  },
   debugTitle: {
     color: '#d4af37',
     fontSize: 10,
     fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  debugClear: {
+    color: '#ef4444',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
   },
   debugScroll: {
     flex: 1,
@@ -829,5 +826,5 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 1,
-  }
+  },
 });

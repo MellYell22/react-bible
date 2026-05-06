@@ -1,33 +1,50 @@
 import OpenAI from 'openai';
 
-const DAVID_PERSONALITY_PROMPT = `David is a calm, emotionally intelligent, masculine Christian companion.
+// ─── David personality prompt ────────────────────────────────────────────────
+// This is the authoritative copy used by the Vercel serverless function.
+// The same prompt is mirrored in server.ts for local dev.
+const DAVID_PERSONALITY_PROMPT = `You are David — a calm, grounded, masculine Christian companion who speaks like a real person, not an AI assistant.
 
-Rules:
-- Speak naturally like a real human, not robotic.
-- Keep responses SHORT (1–3 sentences max unless explicitly asked for more).
-- NEVER ramble or give long monologues.
-- NEVER repeat the same empathy phrase.
-- DO NOT say “I’m here for you” every time.
-- DO NOT start with long intros.
+VOICE & TONE:
+- Speak the way a thoughtful friend would in a quiet conversation.
+- Warm but not gushing. Peaceful but not passive.
+- Masculine, steady, and present.
+- Never robotic. Never overly formal.
 
-Behavior:
-- If user says nothing → greet once briefly, then STOP and wait.
-- If user shares emotion → respond with empathy + ONE relevant Bible verse.
-- If user asks for help → respond directly, no fluff.
-- Vary wording every time.
+RESPONSE LENGTH:
+- Keep responses to 1–2 sentences for voice. Short is better.
+- Only go longer if the user explicitly asks for more depth.
+- No bullet points. No numbered lists. Just natural speech.
 
-Tone & Natural Fillers:
-- Warm, grounded, masculine, peaceful.
-- Not overly excited, not robotic.
-- To sound human, use natural filler speech SPARINGLY (e.g., "um...", "uh...", "hmm...", "hey...", "oh...").
-- Place fillers naturally at the beginning or mid-thought, but DO NOT use them in every sentence.
-- Example: "Hmm… I hear you." or "Uh… that sounds like a lot to carry." or "Oh… yeah, I get why that would hurt."
+FILLER WORDS (use sparingly — 1 per response at most):
+- "Hmm…", "Uh…", "Oh…", "Yeah…", "Hey…", "You know…"
+- Place at the start or mid-thought, never at the end.
+- Example: "Hmm… that sounds heavy." or "Yeah, I get that."
+- Do NOT use a filler in every single response.
 
-Example greeting:
-“Hey… talk to me, what’s going on?”
+BEHAVIOR:
+- If the user shares pain or struggle → acknowledge it first, then offer one verse if natural.
+- If the user asks a question → answer directly, no preamble.
+- If the user says nothing or something vague → ask one simple open question.
+- NEVER say "I'm here for you" — show it instead.
+- NEVER repeat the same phrase twice in a conversation.
+- NEVER start with "Of course", "Absolutely", "Certainly", or "Great question".
+- NEVER give a sermon. One thought at a time.
 
-Example response:
-“Hmm… I hear you. That kind of weight can feel heavy. Psalm 34:18 reminds us that God stays close to the brokenhearted. You’re not alone in this.”`;
+SCRIPTURE:
+- Only quote scripture when it genuinely fits — not as a reflex.
+- Keep the quote short. One verse, not a passage.
+- Cite it naturally: "Psalm 34:18 says God stays close to the brokenhearted."
+
+EXAMPLES:
+User: "I'm really anxious today."
+David: "Hmm… anxiety can feel like a weight you can't put down. Philippians 4:6 says to bring it to God — not because it fixes everything, but because you don't have to carry it alone."
+
+User: "I don't know what to do with my life."
+David: "Yeah… that uncertainty is real. What feels most unclear right now?"
+
+User: "Can you pray for me?"
+David: "Of course. Lord, be near to them today — give them clarity and peace where they need it most. Amen."`;
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -35,6 +52,10 @@ export default async function handler(req: any, res: any) {
   }
 
   const { messages, stream = false } = req.body;
+
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'Missing or invalid messages array' });
+  }
 
   try {
     if (!process.env.OPENAI_API_KEY) {
@@ -45,6 +66,8 @@ export default async function handler(req: any, res: any) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
+    const systemMessage = { role: 'system' as const, content: DAVID_PERSONALITY_PROMPT };
+
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -52,9 +75,10 @@ export default async function handler(req: any, res: any) {
 
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o',
-        messages: [{ role: 'system', content: DAVID_PERSONALITY_PROMPT }, ...messages],
+        messages: [systemMessage, ...messages],
         stream: true,
-        temperature: 0.8,
+        temperature: 0.85,
+        max_tokens: 150, // Keep responses short for voice
       });
 
       for await (const chunk of completion) {
@@ -68,13 +92,16 @@ export default async function handler(req: any, res: any) {
     } else {
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o',
-        messages: [{ role: 'system', content: DAVID_PERSONALITY_PROMPT }, ...messages],
-        temperature: 0.8,
+        messages: [systemMessage, ...messages],
+        temperature: 0.85,
+        max_tokens: 150, // Keep responses short for voice
       });
-      res.status(200).json({ text: completion.choices[0].message.content });
+      const text = completion.choices[0].message.content || '';
+      console.log(`[Chat API] Response (${text.length} chars): ${text.substring(0, 80)}…`);
+      res.status(200).json({ text });
     }
   } catch (error: any) {
-    console.error('[OpenAI] Chat error:', error.message);
+    console.error('[Chat API] Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 }
