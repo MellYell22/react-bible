@@ -53,7 +53,7 @@ export default function VoiceScreen({ route, navigation }: any) {
   const audioContextRef     = useRef<AudioContext | null>(null);
   // Retry tracking for speech recognition network errors
   const micRetryCountRef    = useRef(0);
-  const MAX_MIC_RETRIES     = 2; // Show text fallback after 2 network failures
+  const MAX_MIC_RETRIES     = 1; // Show text fallback after 1 network failure (network errors are persistent)
 
   // ── Logging helper (also pushes to on-screen debug panel) ────────────────
   const addLog = (msg: string) => {
@@ -362,19 +362,19 @@ export default function VoiceScreen({ route, navigation }: any) {
       }
 
       if (errCode === 'network') {
+        // Network errors are persistent — show text fallback immediately after 1 retry
         if (retryNum <= MAX_MIC_RETRIES) {
-          // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-          const delay = Math.min(1000 * Math.pow(2, retryNum - 1), 16000);
+          const delay = 2000;
           log(`Network error — retry ${retryNum}/${MAX_MIC_RETRIES} in ${delay}ms`);
-          addLog(`Mic network error (attempt ${retryNum}/${MAX_MIC_RETRIES}) — retrying in ${Math.round(delay/1000)}s…`);
-          setError(`Speech recognition network issue. Retrying… (${retryNum}/${MAX_MIC_RETRIES})`);
+          addLog(`Mic network error — retrying once…`);
+          setError(`Speech recognition network issue. Retrying…`);
           setTimeout(() => {
             if (isConnectedRef.current) startListening();
           }, delay);
         } else {
-          log('Network error — max retries reached, switching to text fallback');
-          addLog('Speech recognition unavailable. Switched to text input.');
-          setError('Speech recognition is unavailable. Type your message below.');
+          log('Network error — switching to text input');
+          addLog('Speech recognition unavailable. Use the text box below.');
+          setError(null); // Clear error — text box is the message
           setShowTextFallback(true);
         }
         return;
@@ -578,14 +578,7 @@ export default function VoiceScreen({ route, navigation }: any) {
         </MotionView>
       )}
 
-      {/* Error banner */}
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      {/* Text input fallback — shown when speech recognition fails */}
+      {/* Text input fallback — shown when speech recognition fails (above error banner so it's visible) */}
       {isConnected && showTextFallback && (
         <View style={styles.textInputContainer}>
           <Text style={styles.textInputLabel}>Type your message to David</Text>
@@ -621,6 +614,13 @@ export default function VoiceScreen({ route, navigation }: any) {
           >
             <Text style={styles.retryMicText}>Try microphone again</Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Error banner — only show when text fallback is NOT shown */}
+      {error && !showTextFallback && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
 
