@@ -182,28 +182,26 @@ export default function MoodScreen({ route, navigation }: any) {
     
     setIsSpeaking(true);
     try {
-      const base64Audio = await generateSpeech(result.encouragement);
-      if (base64Audio) {
-        if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      // generateSpeech returns a blob URL — use HTML Audio directly (NOT base64/AudioContext)
+      const audioUrl = await generateSpeech(result.encouragement);
+      if (audioUrl) {
+        const audio = new Audio(audioUrl);
+        audio.onended = () => {
+          setIsSpeaking(false);
+          URL.revokeObjectURL(audioUrl);
+        };
+        audio.onerror = () => {
+          console.error('[MoodScreen] Audio playback error');
+          setIsSpeaking(false);
+          URL.revokeObjectURL(audioUrl);
+        };
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err: any) => {
+            console.error('[MoodScreen] audio.play() blocked:', err?.message);
+            setIsSpeaking(false);
+          });
         }
-        const context = audioContextRef.current;
-        if (context.state === 'suspended') {
-          await context.resume();
-        }
-
-        const binary = atob(base64Audio);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        
-        // Properly decode the MP3/AAC data from OpenAI
-        const audioBuffer = await context.decodeAudioData(bytes.buffer);
-        
-        const source = context.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(context.destination);
-        source.onended = () => setIsSpeaking(false);
-        source.start();
       } else {
         setIsSpeaking(false);
       }
