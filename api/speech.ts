@@ -35,7 +35,7 @@ export default async function handler(req: any, res: any) {
     console.log(`[Speech API] API Key found. Length: ${apiKey.length}, Starts with: ${apiKey.substring(0, 3)}...`);
 
     // 2. Resolve Voice ID with fallbacks (Default to Adam if none provided)
-    const defaultVoiceId = '6j5m6aQo2Q3NyLs6PYOz'; // Custom voice
+    const defaultVoiceId = 'vek32IUMncn9S8XIcFt5'; // Custom David voice (updated)
     const voiceId = process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID || defaultVoiceId;
     
     console.log(`[Speech API] Using Voice ID: ${voiceId}`);
