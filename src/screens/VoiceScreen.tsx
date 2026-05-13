@@ -164,6 +164,10 @@ export default function VoiceScreen({ route, navigation }: any) {
       ];
 
       log('AI request sent', `history length: ${history.length}`);
+      
+      // Natural delay (1-2 seconds) before response starts
+      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+      
       const response = await getChatResponse(history, profile?.preferred_response_length || 'short');
       log('AI response received', response.substring(0, 80) + (response.length > 80 ? '…' : ''));
 
@@ -533,9 +537,9 @@ export default function VoiceScreen({ route, navigation }: any) {
               }}
               style={{
                 position: 'absolute',
-                width: 140,
-                height: 140,
-                borderRadius: 70,
+                width: 110,
+                height: 110,
+                borderRadius: 55,
                 backgroundColor: 'rgba(212, 175, 55, 0.4)',
                 zIndex: 1,
               }}
@@ -563,15 +567,15 @@ export default function VoiceScreen({ route, navigation }: any) {
                 animate={{ scale: [1, 1.2, 1] }}
                 transition={{ duration: 0.4, repeat: Infinity }}
               >
-                <Sparkles color="#d4af37" size={56} />
+                <Sparkles color="#d4af37" size={40} />
               </MotionView>
             ) : isDavidThinking ? (
               <ActivityIndicator color="#d4af37" size="large" />
             ) : (
-              <Mic color={isListening ? '#0b1e3d' : '#fff'} size={56} />
+                <Mic color={isListening ? '#0b1e3d' : '#fff'} size={40} />
             )
           ) : (
-            <MicOff color="#9CA3AF" size={56} />
+                <MicOff color="#9CA3AF" size={40} />
           )}
         </TouchableOpacity>
       </View>
@@ -744,16 +748,16 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   visualizerContainer: {
-    width: 140,
-    height: 140,
+    width: 120,
+    height: 120,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 30,
   },
   mainCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#0b1e3d',
     justifyContent: 'center',
     alignItems: 'center',

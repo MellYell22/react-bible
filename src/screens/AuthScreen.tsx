@@ -303,10 +303,10 @@ const styles = StyleSheet.create({
   },
 
   headerTitle: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
     color: GOLD,
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
   },
@@ -410,17 +410,17 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    marginTop: 40,
+    paddingHorizontal: 18,
+    marginTop: 32,
   },
 
   mainTitle: {
-    fontSize: 42,
+    fontSize: 36,
     fontWeight: '700',
     color: '#ffffff',
-    letterSpacing: 3,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 50,
+    marginBottom: 40,
     fontFamily: 'Playfair Display',
     textAlign: 'center',
   },
@@ -434,17 +434,17 @@ const styles = StyleSheet.create({
 
   errorContainer: {
     width: '100%',
-    padding: 12,
+    padding: 10,
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
     borderRadius: 4,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
-    marginBottom: 24,
+    marginBottom: 20,
   },
 
   errorText: {
     color: '#ef4444',
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'center',
     fontWeight: '600',
     fontFamily: 'Playfair Display',
@@ -453,7 +453,7 @@ const styles = StyleSheet.create({
   // Input Group
   inputGroup: {
     width: '100%',
-    marginBottom: 24,
+    marginBottom: 20,
   },
 
   inputLabel: {
@@ -488,9 +488,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(212, 175, 55, 0.3)',
     borderRadius: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    fontSize: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    fontSize: 13,
     color: '#ffffff',
     fontFamily: 'Playfair Display',
   },
@@ -500,8 +500,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    marginBottom: 24,
-    gap: 8,
+    marginBottom: 20,
+    gap: 6,
   },
 
   checkbox: {
@@ -526,9 +526,9 @@ const styles = StyleSheet.create({
   },
 
   rememberMeText: {
-    fontSize: 10,
+    fontSize: 9,
     color: 'rgba(212, 175, 55, 0.7)',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
     fontWeight: '600',
     fontFamily: 'Cinzel',
@@ -538,17 +538,17 @@ const styles = StyleSheet.create({
   signInButton: {
     width: '100%',
     backgroundColor: GOLD,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderRadius: 4,
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
 
   signInButtonText: {
     color: DARK_NAVY,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
   },
@@ -559,17 +559,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: 'rgba(212, 175, 55, 0.5)',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderRadius: 4,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
 
   createAccountText: {
     color: 'rgba(212, 175, 55, 0.7)',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
   },
@@ -581,9 +581,9 @@ const styles = StyleSheet.create({
 
   guestLink: {
     color: 'rgba(212, 175, 55, 0.5)',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
   },
@@ -596,9 +596,9 @@ const styles = StyleSheet.create({
 
   toggleText: {
     color: SOFT_GOLD,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     textAlign: 'center',
     fontFamily: 'Playfair Display',
   },

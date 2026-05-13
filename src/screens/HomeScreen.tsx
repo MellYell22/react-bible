@@ -142,13 +142,13 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 40,
+    paddingHorizontal: 18,
+    paddingVertical: 32,
   },
 
   // Mood Section
   moodSection: {
-    marginBottom: 60,
+    marginBottom: 48,
     alignItems: 'center',
   },
 
@@ -156,17 +156,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 12,
+    gap: 10,
   },
 
   moodButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderWidth: 1.5,
     borderColor: 'rgba(212, 175, 55, 0.4)',
-    borderRadius: 24,
+    borderRadius: 20,
     backgroundColor: 'transparent',
-    marginBottom: 8,
+    marginBottom: 6,
   },
 
   moodButtonActive: {
@@ -179,10 +179,10 @@ const styles = StyleSheet.create({
   },
 
   moodButtonText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     color: 'rgba(212, 175, 55, 0.6)',
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
   },
@@ -193,15 +193,15 @@ const styles = StyleSheet.create({
 
   // Verse of the Day Section
   verseSection: {
-    marginBottom: 60,
+    marginBottom: 48,
     alignItems: 'center',
   },
 
   verseBorder: {
     width: '100%',
     maxWidth: 500,
-    paddingVertical: 40,
-    paddingHorizontal: 30,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
     borderWidth: 1,
     borderColor: 'rgba(212, 175, 55, 0.2)',
     borderRadius: 8,
@@ -209,48 +209,49 @@ const styles = StyleSheet.create({
   },
 
   verseLabel: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '700',
     color: GOLD,
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: 4,
     fontFamily: 'Cinzel',
   },
 
   verseDate: {
-    fontSize: 8,
+    fontSize: 7,
     color: 'rgba(212, 175, 55, 0.5)',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-    marginBottom: 24,
+    marginBottom: 18,
     fontFamily: 'Cinzel',
   },
 
   verseText: {
-    fontSize: 18,
+    fontSize: 17,
     color: '#ffffff',
     fontStyle: 'italic',
     textAlign: 'center',
-    lineHeight: 28,
-    marginBottom: 16,
+    lineHeight: 26,
+    marginBottom: 14,
     fontFamily: 'Playfair Display',
+    fontWeight: '400',
   },
 
   verseReference: {
-    fontSize: 10,
+    fontSize: 9,
     color: GOLD,
     fontWeight: '700',
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: 20,
+    marginBottom: 16,
     fontFamily: 'Cinzel',
   },
 
   reflectionLink: {
-    fontSize: 9,
+    fontSize: 8,
     color: 'rgba(212, 175, 55, 0.6)',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
     fontWeight: '600',
     fontFamily: 'Cinzel',
@@ -259,32 +260,32 @@ const styles = StyleSheet.create({
   // Action Section
   actionSection: {
     alignItems: 'center',
-    marginBottom: 60,
+    marginBottom: 48,
   },
 
   talkButton: {
-    paddingHorizontal: 40,
-    paddingVertical: 14,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
     borderWidth: 1.5,
     borderColor: GOLD,
     borderRadius: 4,
     backgroundColor: 'transparent',
-    marginBottom: 16,
+    marginBottom: 12,
   },
 
   talkButtonText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: GOLD,
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
   },
 
   actionSubtitle: {
-    fontSize: 8,
+    fontSize: 7.5,
     color: 'rgba(212, 175, 55, 0.5)',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
     fontWeight: '600',
     fontFamily: 'Cinzel',
@@ -293,14 +294,14 @@ const styles = StyleSheet.create({
   // Footer
   footer: {
     alignItems: 'center',
-    marginTop: 40,
-    paddingBottom: 20,
+    marginTop: 32,
+    paddingBottom: 16,
   },
 
   footerText: {
-    fontSize: 8,
+    fontSize: 7,
     color: 'rgba(212, 175, 55, 0.3)',
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
     fontWeight: '700',
     fontFamily: 'Cinzel',
