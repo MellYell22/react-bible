@@ -449,7 +449,7 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
             <View style={styles.benefitItem}>
               <CheckCircle2 size={16} color="#10B981" />
               <Text style={styles.benefitText}>
-                {profile?.subscription_tier === 'pro' ? 'Mood-based Music and Reflections' : 'Daily Verse of the Day'}
+                {profile?.subscription_tier === 'pro' ? 'Advanced Mood-based Reflections' : 'Daily Verse of the Day'}
               </Text>
             </View>
             {profile?.subscription_tier === 'pro' && (

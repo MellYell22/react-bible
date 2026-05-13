@@ -54,7 +54,18 @@ export default function ChatScreen({ navigation }: any) {
       history.push({ role: 'user', content: userMessage.content });
 
       const modelMessageIndex = messages.length + 1;
-      setMessages(prev => [...prev, { role: 'assistant', content: "" }]);
+      // Add thinking indicator
+      setMessages(prev => [...prev, { role: 'assistant', content: "David is thinking..." }]);
+      
+      // Natural delay (1-2 seconds) before response starts
+      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+      
+      // Clear thinking indicator and start streaming response
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[modelMessageIndex] = { role: 'assistant', content: "" };
+        return newMessages;
+      });
 
       const response = await getChatResponseStream(history, (fullText) => {
         setMessages(prev => {
