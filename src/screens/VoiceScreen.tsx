@@ -21,22 +21,25 @@ const log = (event: string, detail?: any) => {
 };
 
 // ─── David opening greetings (natural, warm, brief) ────────────────────────
-const DAVID_OPENING_GREETINGS = [
-  "Hey… I'm here with you. How are you feeling today?",
-  "Hmm… what's been weighing on your heart lately?",
-  "Hey… talk to me. What's on your mind?",
-  "I'm listening. Take your time.",
-  "What's been going on with you?",
-  "Hey… how are you really doing?",
-  "You know… I'm here if you want to talk.",
-];
+const getDavidGreeting = (firstName: string): string => {
+  const n = firstName ? `${firstName}…` : '…';
+  const greetings = [
+    `Hey, ${n} how've you been feeling today?`,
+    `Hi, ${n} what's been on your mind lately?`,
+    `Hey, ${n} how are you really doing today?`,
+    `Hey, ${n} take your time. What's been going on?`,
+    `Hmm, ${n} what's been weighing on your heart?`,
+    `Hey, ${n} good to hear your voice. What's going on with you?`,
+  ];
+  return greetings[Math.floor(Math.random() * greetings.length)];
+};
 
 // ─── David personality prompt ────────────────────────────────────────────────
 // Kept here as a reference — the authoritative copy lives in api/chat.ts (Vercel)
 // and server.ts (local dev). Both are kept in sync.
 
 export default function VoiceScreen({ route, navigation }: any) {
-  const { profile } = useUser();
+  const { profile, session } = useUser();
 
   // ── Conversation state machine ────────────────────────────────────────────
   // idle: not connected
@@ -154,7 +157,15 @@ export default function VoiceScreen({ route, navigation }: any) {
       setIsConnected(true);
 
       // Play David's opening greeting
-      const greeting = DAVID_OPENING_GREETINGS[Math.floor(Math.random() * DAVID_OPENING_GREETINGS.length)];
+      const metaName = session?.user?.user_metadata?.full_name
+        || session?.user?.user_metadata?.name || '';
+      const cleanMeta = metaName.includes('@') ? '' : metaName;
+      const rawName = cleanMeta
+        || profile?.email?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || '';
+      const firstName = rawName
+        ? rawName.split(' ')[0].charAt(0).toUpperCase() + rawName.split(' ')[0].slice(1).toLowerCase()
+        : '';
+      const greeting = getDavidGreeting(firstName);
       log('Playing opening greeting', greeting);
       
       setIsDavidSpeaking(true);
@@ -266,18 +277,14 @@ export default function VoiceScreen({ route, navigation }: any) {
     setConversationState('processing');
 
     try {
+      const recentMessages = messages.slice(-10);
       const history = [
-        ...messages.map(m => ({ role: m.role, content: m.content })),
+        ...recentMessages.map(m => ({ role: m.role, content: m.content })),
         newUserMessage,
       ];
 
       log('AI request sent', `history length: ${history.length}`);
-      
-      // David takes a moment to reflect (1.5-2.5 seconds) before responding
-      // This simulates human-like thinking and makes the conversation feel more natural
-      const reflectionDelay = 1500 + Math.random() * 1000;
-      await new Promise(resolve => setTimeout(resolve, reflectionDelay));
-      
+
       const response = await getChatResponse(history, profile?.preferred_response_length || 'short');
       
       // Validate response
