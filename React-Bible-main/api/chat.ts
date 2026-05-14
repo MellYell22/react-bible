@@ -83,62 +83,37 @@ PACING & DELIVERY:
 FINAL REMINDER:
 Your goal is to make people feel truly heard, spiritually supported, and less alone. Every response should feel like it comes from a real person who genuinely cares, not from an algorithm. Vary your approach. Stay human. Stay present.`;
 
-export default async function handler(req: any, res: any) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+const validateTranscript = (transcript) => {
+  if (!transcript || transcript.trim() === '') {
+    return {
+      valid: false,
+      message: "Hmm... I didn't quite catch that. Take your time — I'm listening.",
+    };
+  }
+  return { valid: true };
+};
+
+export default async function handler(req, res) {
+  const { transcript, mood } = req.body;
+
+  const validation = validateTranscript(transcript);
+  if (!validation.valid) {
+    return res.status(200).json({ response: validation.message });
   }
 
-  const { messages, stream = false } = req.body;
-
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'Missing or invalid messages array' });
-  }
+  const prompt = `${DAVID_PERSONALITY_PROMPT}\n\nUser said: "${transcript}"\nMood: ${mood || 'neutral'}`;
 
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OpenAI API Key is not configured.');
-    }
-
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+    const openai = new OpenAI(process.env.OPENAI_API_KEY);
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'system', content: prompt }],
     });
 
-    const systemMessage = { role: 'system' as const, content: DAVID_PERSONALITY_PROMPT };
-
-    if (stream) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [systemMessage, ...messages],
-        stream: true,
-        temperature: 0.9,
-        max_tokens: 200,
-      });
-
-      for await (const chunk of completion) {
-        const content = chunk.choices[0]?.delta?.content || '';
-        if (content) {
-          res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
-        }
-      }
-      res.write('data: [DONE]\n\n');
-      res.end();
-    } else {
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [systemMessage, ...messages],
-        temperature: 0.9,
-        max_tokens: 200,
-      });
-      const text = completion.choices[0].message.content || '';
-      console.log(`[Chat API] Response (${text.length} chars): ${text.substring(0, 100)}…`);
-      res.status(200).json({ text });
-    }
-  } catch (error: any) {
-    console.error('[Chat API] Error:', error.message);
-    res.status(500).json({ error: error.message });
+    const response = completion.choices[0].message.content;
+    res.status(200).json({ response });
+  } catch (error) {
+    console.error('[Chat API] Error generating response:', error);
+    res.status(500).json({ error: 'Failed to generate response' });
   }
 }
