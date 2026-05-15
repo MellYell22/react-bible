@@ -12,11 +12,11 @@ export default function ChatScreen({ navigation }: any) {
 
   useEffect(() => {
     const greetings = [
-      "Hello, I'm David. How can I encourage you today?",
-      "Hi, I'm David. What's on your mind?",
-      "Hey! I'm David. I'm glad you're here. What would you like to talk about?",
-      "Hello. I'm David. Is there something specific you'd like to explore today?",
-      "Hi there. I'm David. I'm here for support, scripture, or just to chat."
+      "Hey. I'm glad you came by.",
+      "Good to see you again. What's been weighing on you lately?",
+      "Take your time. What's been going on?",
+      "I'm glad you're here. How are you really doing today?",
+      "Good to sit with you for a minute. What's been on your heart?"
     ];
     const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
     setMessages([{ role: 'assistant', content: randomGreeting }]);
@@ -55,7 +55,7 @@ export default function ChatScreen({ navigation }: any) {
 
       const modelMessageIndex = messages.length + 1;
       // Add thinking indicator
-      setMessages(prev => [...prev, { role: 'assistant', content: "David is thinking..." }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: "David is reflecting…" }]);
       
       // Natural delay (1-2 seconds) before response starts
       await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
@@ -78,7 +78,7 @@ export default function ChatScreen({ navigation }: any) {
       if (!response) {
         setMessages(prev => {
           const newMessages = [...prev];
-          newMessages[modelMessageIndex] = { role: 'assistant', content: "I'm sorry, I couldn't process that." };
+          newMessages[modelMessageIndex] = { role: 'assistant', content: "Something didn't come through clearly. Try saying that again, a little slower." };
           return newMessages;
         });
       }

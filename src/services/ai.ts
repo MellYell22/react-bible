@@ -74,9 +74,9 @@ export interface ChatHistoryMessage {
 
 export const getChatResponse = async (history: ChatHistoryMessage[], responseLength: ResponseLength = 'short'): Promise<string> => {
   const lengthInstruction = {
-    short: "Provide a warm, meaningful response in 1-2 natural sentences. Avoid generic filler or scripted empathy.",
-    medium: "Offer a deeply present and thoughtful reflection in 2-3 sentences. Let the conversation breathe and feel human.",
-    long: "Provide a rich, spiritually grounded reflection in 3-4 sentences. Speak like a wise friend sitting right next to them."
+    short: "Answer in 1-2 short, natural sentences. Make one specific emotional observation. Avoid generic empathy, advice-dumping, and scripture unless it truly fits.",
+    medium: "Answer in 2-3 natural sentences with human rhythm. Notice the user's emotion specifically, keep scripture optional, and ask only one gentle follow-up if it feels right.",
+    long: "Answer in 3-4 grounded sentences. Be spiritually comforting without preaching, avoid repeated empathy phrases, and stay conversational rather than clinical."
   }[responseLength];
 
   // Map history to OpenAI format (Gemini uses 'model', OpenAI uses 'assistant')
@@ -113,9 +113,9 @@ export const getChatResponseStream = async (
   responseLength: ResponseLength = 'short'
 ): Promise<string> => {
   const lengthInstruction = {
-    short: "Provide a warm, meaningful response in 1-2 natural sentences. Avoid generic filler or scripted empathy.",
-    medium: "Offer a deeply present and thoughtful reflection in 2-3 sentences. Let the conversation breathe and feel human.",
-    long: "Provide a rich, spiritually grounded reflection in 3-4 sentences. Speak like a wise friend sitting right next to them."
+    short: "Answer in 1-2 short, natural sentences. Make one specific emotional observation. Avoid generic empathy, advice-dumping, and scripture unless it truly fits.",
+    medium: "Answer in 2-3 natural sentences with human rhythm. Notice the user's emotion specifically, keep scripture optional, and ask only one gentle follow-up if it feels right.",
+    long: "Answer in 3-4 grounded sentences. Be spiritually comforting without preaching, avoid repeated empathy phrases, and stay conversational rather than clinical."
   }[responseLength];
 
   const messages = history.map(h => ({

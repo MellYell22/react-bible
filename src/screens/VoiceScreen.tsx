@@ -21,16 +21,48 @@ const log = (event: string, detail?: any) => {
 };
 
 // ─── David opening greetings (natural, warm, brief) ────────────────────────
-const getDavidGreeting = (firstName: string): string => {
-  const n = firstName ? `${firstName}…` : '…';
-  const greetings = [
-    `Hey, ${n} how've you been feeling today?`,
-    `Hi, ${n} what's been on your mind lately?`,
-    `Hey, ${n} how are you really doing today?`,
-    `Hey, ${n} take your time. What's been going on?`,
-    `Hmm, ${n} what's been weighing on your heart?`,
-    `Hey, ${n} good to hear your voice. What's going on with you?`,
+const GENERIC_NAME_REJECTIONS = new Set([
+  'admin', 'app', 'apps', 'bible', 'customer', 'david', 'email', 'gmail',
+  'guest', 'hotmail', 'icloud', 'info', 'mail', 'me', 'outlook', 'test',
+  'user', 'username', 'yahoo'
+]);
+
+const cleanFirstName = (value?: string | null): string => {
+  if (!value || typeof value !== 'string') return '';
+  const trimmed = value.trim();
+
+  // Never turn an email address, email prefix, handle, domain fragment, or
+  // machine-style username into a spoken name. A bad name breaks immersion;
+  // no name is always better than the wrong one.
+  if (!trimmed || trimmed.includes('@') || /[._0-9]/.test(trimmed)) return '';
+
+  const first = trimmed.split(/\s+/)[0]?.replace(/[^A-Za-z'-]/g, '') || '';
+  const normalized = first.toLowerCase();
+
+  if (first.length < 2 || first.length > 20) return '';
+  if (!/^[A-Za-z][A-Za-z'-]*$/.test(first)) return '';
+  if (GENERIC_NAME_REJECTIONS.has(normalized)) return '';
+
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+};
+
+const getDavidGreeting = (firstName?: string): string => {
+  const namedGreetings = [
+    `Hey, ${firstName}. Good to hear your voice. What's been weighing on you lately?`,
+    `Good to see you again, ${firstName}. How are you really doing today?`,
+    `${firstName}, I'm glad you came by. What's been on your heart?`,
   ];
+
+  const namelessGreetings = [
+    `Hey. I'm glad you came by.`,
+    `Good to hear your voice again. What's been going on?`,
+    `Take your time. What's been weighing on you lately?`,
+    `Hey. How are you really doing today?`,
+    `I'm here with you. What's been on your heart?`,
+    `Good to see you again. What have you been carrying lately?`,
+  ];
+
+  const greetings = firstName ? [...namedGreetings, ...namelessGreetings] : namelessGreetings;
   return greetings[Math.floor(Math.random() * greetings.length)];
 };
 
@@ -156,15 +188,18 @@ export default function VoiceScreen({ route, navigation }: any) {
       isConnectedRef.current = true;
       setIsConnected(true);
 
-      // Play David's opening greeting
-      const metaName = session?.user?.user_metadata?.full_name
-        || session?.user?.user_metadata?.name || '';
-      const cleanMeta = metaName.includes('@') ? '' : metaName;
-      const rawName = cleanMeta
-        || profile?.email?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || '';
-      const firstName = rawName
-        ? rawName.split(' ')[0].charAt(0).toUpperCase() + rawName.split(' ')[0].slice(1).toLowerCase()
-        : '';
+      // Play David's opening greeting. Use only a real metadata name; never
+      // derive a spoken name from the user's email address or email username.
+      const metadata = session?.user?.user_metadata || {};
+      const identityData = session?.user?.identities?.[0]?.identity_data || {};
+      const firstName = cleanFirstName(metadata.first_name)
+        || cleanFirstName(metadata.given_name)
+        || cleanFirstName(metadata.full_name)
+        || cleanFirstName(metadata.name)
+        || cleanFirstName(identityData.first_name)
+        || cleanFirstName(identityData.given_name)
+        || cleanFirstName(identityData.full_name)
+        || cleanFirstName(identityData.name);
       const greeting = getDavidGreeting(firstName);
       log('Playing opening greeting', greeting);
       
