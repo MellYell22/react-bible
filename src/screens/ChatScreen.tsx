@@ -11,14 +11,18 @@ export default function ChatScreen({ navigation }: any) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
-    const greetings = [
-      "Hey. I'm here with you.",
-      "Hey, good to see you.",
-      "I'm here. What's on your mind?",
-      "Hey. Talk to me.",
-      "Good to see you. What's going on?"
+    const DAVID_OPENING_GREETINGS = [
+      "Hey… I'm glad you came back.",
+      "Hey. What's been on your mind today?",
+      "I'm here. What's going on?",
+      "Hey… how's your heart feeling today?",
+      "It's Good To Hear Your Voice, Hows Things Been Going",
+      "What's been weighing on you lately?",
+      "Hey… tell me what's been going on.",
+      "Hey, Lets Talk. Im All Ears",
+      "Everything Good With You?",
     ];
-    const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
+    const randomGreeting = DAVID_OPENING_GREETINGS[Math.floor(Math.random() * DAVID_OPENING_GREETINGS.length)];
     setMessages([{ role: 'assistant', content: randomGreeting }]);
   }, []);
 
@@ -56,10 +60,10 @@ export default function ChatScreen({ navigation }: any) {
       const modelMessageIndex = messages.length + 1;
       // Add thinking indicator
       setMessages(prev => [...prev, { role: 'assistant', content: "David is reflecting…" }]);
-      
+
       // Natural delay (1-2 seconds) before response starts
       await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
-      
+
       // Clear thinking indicator and start streaming response
       setMessages(prev => {
         const newMessages = [...prev];

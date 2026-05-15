@@ -47,21 +47,20 @@ const cleanFirstName = (value?: string | null): string => {
 };
 
 const getDavidGreeting = (firstName?: string): string => {
-  const namedGreetings = [
-    `Hey, ${firstName}. I'm here with you.`,
-    `Hey, ${firstName}. Good to see you.`,
-    `${firstName}, I'm here. What's on your mind?`,
+  const DAVID_OPENING_GREETINGS = [
+    "Hey… I'm glad you came back.",
+    "Hey. What's been on your mind today?",
+    "I'm here. What's going on?",
+    "Hey… how's your heart feeling today?",
+    "It's Good To Hear Your Voice, Hows Things Been Going",
+    "What's been weighing on you lately?",
+    "Hey… tell me what's been going on.",
+    "Hey, Lets Talk. Im All Ears",
+    "Everything Good With You?",
   ];
 
-  const namelessGreetings = [
-    `Hey. I'm here with you.`,
-    `Hey, good to see you.`,
-    `I'm here. What's on your mind?`,
-    `Hey. Talk to me.`,
-    `Good to see you. What's going on?`,
-  ];
-
-  const greetings = firstName ? [...namedGreetings, ...namelessGreetings] : namelessGreetings;
+  const namedGreetings = DAVID_OPENING_GREETINGS.map(greeting => `Hey, ${firstName}. ${greeting}`);
+  const greetings = firstName ? [...namedGreetings, ...DAVID_OPENING_GREETINGS] : DAVID_OPENING_GREETINGS;
   return greetings[Math.floor(Math.random() * greetings.length)];
 };
 
@@ -82,36 +81,36 @@ export default function VoiceScreen({ route, navigation }: any) {
   const [conversationState, setConversationState] = useState<'idle' | 'starting' | 'listening' | 'processing' | 'speaking' | 'ended'>('idle');
 
   // ── UI state ──────────────────────────────────────────────────────────────
-  const [isConnecting, setIsConnecting]     = useState(false);
-  const [isConnected, setIsConnected]       = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [isDavidThinking, setIsDavidThinking] = useState(false);
   const [isDavidSpeaking, setIsDavidSpeaking] = useState(false);
-  const [hasKey, setHasKey]                 = useState(true);
-  const [debugLogs, setDebugLogs]           = useState<string[]>([]);
-  const [error, setError]                   = useState<string | null>(null);
-  const [showDebug, setShowDebug]           = useState(false);
+  const [hasKey, setHasKey] = useState(true);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [showDebug, setShowDebug] = useState(false);
   const [lastResponseText, setLastResponseText] = useState<string | null>(null);
-  const [messages, setMessages]             = useState<ChatMessage[]>([]);
-  const [lastFeedback, setLastFeedback]     = useState<'up' | 'down' | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [lastFeedback, setLastFeedback] = useState<'up' | 'down' | null>(null);
   // Text fallback when speech recognition fails
-  const [textInput, setTextInput]           = useState('');
+  const [textInput, setTextInput] = useState('');
   const [showTextFallback, setShowTextFallback] = useState(false);
-  const [micErrorCount, setMicErrorCount]   = useState(0);
+  const [micErrorCount, setMicErrorCount] = useState(0);
 
   // ── Refs (never stale inside callbacks) ──────────────────────────────────
-  const recognitionRef      = useRef<any>(null);
-  const currentAudioRef     = useRef<HTMLAudioElement | null>(null);
-  const isConnectedRef      = useRef(false);
-  const isDavidSpeakingRef  = useRef(false);
-  const audioContextRef     = useRef<AudioContext | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const isConnectedRef = useRef(false);
+  const isDavidSpeakingRef = useRef(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
   // Retry tracking for speech recognition network errors
-  const micRetryCountRef    = useRef(0);
-  const MAX_MIC_RETRIES     = 1; // Show text fallback after 1 network failure (network errors are persistent)
+  const micRetryCountRef = useRef(0);
+  const MAX_MIC_RETRIES = 1; // Show text fallback after 1 network failure (network errors are persistent)
   // Silence detection for automatic speech-end detection
-  const audioProcessorRef   = useRef<ScriptProcessorNode | null>(null);
-  const silenceTimeoutRef   = useRef<NodeJS.Timeout | null>(null);
-  const SILENCE_THRESHOLD   = 0.01; // RMS threshold for silence
-  const SILENCE_DURATION    = 1500; // milliseconds of silence to trigger stop
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const SILENCE_THRESHOLD = 0.01; // RMS threshold for silence
+  const SILENCE_DURATION = 1500; // milliseconds of silence to trigger stop
 
   // ── Logging helper (also pushes to on-screen debug panel) ────────────────
   const addLog = (msg: string) => {
@@ -201,7 +200,7 @@ export default function VoiceScreen({ route, navigation }: any) {
         || cleanFirstName(identityData.name);
       const greeting = getDavidGreeting(firstName);
       log('Playing opening greeting', greeting);
-      
+
       setIsDavidSpeaking(true);
       isDavidSpeakingRef.current = true;
       setConversationState('speaking');
@@ -221,10 +220,10 @@ export default function VoiceScreen({ route, navigation }: any) {
             currentAudioRef.current = null;
             setConversationState('listening');
             setIsConnecting(false);
-            
+
             // Add David's greeting as first assistant message
             setMessages([{ role: 'assistant', content: greeting }]);
-            
+
             // Now start listening for user input
             setTimeout(() => startListening(), 300);
           };
@@ -320,7 +319,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       log('AI request sent', `history length: ${history.length}`);
 
       const response = await getChatResponse(history, profile?.preferred_response_length || 'short');
-      
+
       // Validate response
       if (!response || !response.trim()) {
         addLog('Empty AI response — restarting mic');
@@ -331,7 +330,7 @@ export default function VoiceScreen({ route, navigation }: any) {
         }
         return;
       }
-      
+
       log('AI response received', response.substring(0, 80) + (response.length > 80 ? '…' : ''));
 
       setIsDavidThinking(false);
@@ -474,7 +473,7 @@ export default function VoiceScreen({ route, navigation }: any) {
 
     // Stop any existing recorder
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) { }
       recognitionRef.current = null;
     }
 
@@ -550,10 +549,10 @@ export default function VoiceScreen({ route, navigation }: any) {
         processor.onaudioprocess = (e) => {
           const dataArray = new Uint8Array(analyser.frequencyBinCount);
           analyser.getByteFrequencyData(dataArray);
-          
+
           // Calculate average frequency magnitude
           const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-          
+
           if (average < 30) { // Silence threshold in frequency domain
             consecutiveSilenceFrames++;
             if (consecutiveSilenceFrames >= silenceFramesNeeded) {
@@ -687,15 +686,15 @@ export default function VoiceScreen({ route, navigation }: any) {
     setConversationState('ended');
 
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try { recognitionRef.current.stop(); } catch (e) { }
       recognitionRef.current = null;
     }
     if (currentAudioRef.current) {
-      try { currentAudioRef.current.pause(); } catch (e) {}
+      try { currentAudioRef.current.pause(); } catch (e) { }
       currentAudioRef.current = null;
     }
     if (audioProcessorRef.current) {
-      try { audioProcessorRef.current.disconnect(); } catch (e) {}
+      try { audioProcessorRef.current.disconnect(); } catch (e) { }
       audioProcessorRef.current = null;
     }
     if (silenceTimeoutRef.current) {
@@ -789,7 +788,7 @@ export default function VoiceScreen({ route, navigation }: any) {
 
         <TouchableOpacity
           style={[styles.mainCircle, isConnected && styles.mainActive,
-            conversationState === 'listening' && styles.mainListening]}
+          conversationState === 'listening' && styles.mainListening]}
           onPress={() => {
             // Mic button is now visual only - no manual send needed
           }}
@@ -807,10 +806,10 @@ export default function VoiceScreen({ route, navigation }: any) {
             ) : isDavidThinking ? (
               <ActivityIndicator color="#d4af37" size="large" />
             ) : (
-                <Mic color={conversationState === 'listening' ? '#0b1e3d' : '#fff'} size={40} />
+              <Mic color={conversationState === 'listening' ? '#0b1e3d' : '#fff'} size={40} />
             )
           ) : (
-                <MicOff color="#9CA3AF" size={40} />
+            <MicOff color="#9CA3AF" size={40} />
           )}
         </TouchableOpacity>
       </View>
@@ -822,10 +821,10 @@ export default function VoiceScreen({ route, navigation }: any) {
             {isDavidSpeaking
               ? 'David is speaking…'
               : isDavidThinking
-              ? 'David is reflecting…'
-              : conversationState === 'listening'
-              ? 'Listening…'
-              : 'Processing…'}
+                ? 'David is reflecting…'
+                : conversationState === 'listening'
+                  ? 'Listening…'
+                  : 'Processing…'}
           </Text>
         </View>
       )}
