@@ -15,22 +15,37 @@ export const NOISE_TRANSCRIPT_PATTERNS = [
   /^\[.*\]$/,
 ];
 
+/** True session openers — used to block a second greeting mid-session. */
 const OPENING_GREETING_PATTERNS = [
   /^hey[,.]?\s/i,
+  /^hey\.?$/i,
   /^hi[,.]?\s/i,
   /^hello[,.]?\s/i,
-  /^good to (see|hear)/i,
-  /^good to hear from you/i,
-  /^i'?m here/i,
+  /^good to see/i,
   /^what'?s (been on your mind|going on|up)/i,
   /^how'?s your (heart|night|day)/i,
   /^glad you came back/i,
-  /^how are you feeling/i,
-  /^i'?m (here for you|here to listen|glad you)/i,
+  /^what'?s been weighing/i,
+  /^there you are/i,
+  /^how'?s it going/i,
+  /^what'?s up/i,
+  /^quiet night/i,
+  /^long day/i,
+];
+
+/** Therapy-bot / assistant phrases — replace with fallback, never silent retry. */
+const BANNED_THERAPY_PHRASE_PATTERNS = [
+  /^how are you feeling(\s+today)?/i,
+  /^tell me more/i,
   /^it sounds like you/i,
   /^you seem (like you|deep)/i,
-  /^tell me more/i,
-  /^what'?s been weighing/i,
+  /^i'?m (here for you|here to listen)/i,
+  /^i'?m glad you/i,
+  /^that must be hard/i,
+  /^how can i help/i,
+  /^you are not alone/i,
+  /^good to hear from you/i,
+  /^you'?ve got something on your mind/i,
 ];
 
 export const MIN_MEANINGFUL_WORDS = 2;
@@ -93,4 +108,11 @@ export function looksLikeOpeningGreeting(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   return OPENING_GREETING_PATTERNS.some(re => re.test(t));
+}
+
+/** Persona-banned therapy / assistant phrasing — swap for a natural fallback. */
+export function looksLikeBannedTherapyPhrase(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return BANNED_THERAPY_PHRASE_PATTERNS.some(re => re.test(t));
 }

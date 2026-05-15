@@ -14,6 +14,7 @@ import {
   isMeaningfulTranscript,
   isDuplicateTranscript,
   looksLikeOpeningGreeting,
+  looksLikeBannedTherapyPhrase,
   normalizeTranscript,
 } from '../utils/voiceTranscript';
 import { getDavidGreeting, DAVID_ANTI_REPEAT_FALLBACKS } from '../constants/davidPersona';
@@ -444,23 +445,25 @@ export default function VoiceScreen({ route, navigation }: any) {
         return;
       }
 
-      if (hasGreetedRef.current && looksLikeOpeningGreeting(response)) {
-        addLog('Skipped greeting-like AI reply (one greeting per session)');
-        setIsDavidThinking(false);
-        isProcessingVoiceRef.current = false;
-        setConversationState('listening');
-        scheduleListenRetry('Greeting-like response');
-        return;
-      }
-
       log('AI response received', response.substring(0, 80) + (response.length > 80 ? '…' : ''));
 
-      // ── Anti-repeat guard ─────────────────────────────────────────────────
-      // If the new response is too similar to the last one, swap it for a
-      // short natural fallback so David never sounds like a stuck record.
+      // ── Response guards — swap bad lines for a short fallback (never silent retry) ──
       let finalResponse = response;
-      if (isTooSimilar(lastDavidResponseRef.current, response)) {
-        const fallback = ANTI_REPEAT_FALLBACKS[Math.floor(Math.random() * ANTI_REPEAT_FALLBACKS.length)];
+      const pickFallback = () =>
+        ANTI_REPEAT_FALLBACKS[Math.floor(Math.random() * ANTI_REPEAT_FALLBACKS.length)];
+
+      if (looksLikeBannedTherapyPhrase(response)) {
+        const fallback = pickFallback();
+        log('Banned therapy phrase — swapping response', `"${response.substring(0, 60)}" → "${fallback}"`);
+        addLog('Replaced banned therapy phrase with fallback');
+        finalResponse = fallback;
+      } else if (hasGreetedRef.current && looksLikeOpeningGreeting(response)) {
+        const fallback = pickFallback();
+        log('Duplicate opening greeting — swapping response', `"${response.substring(0, 60)}" → "${fallback}"`);
+        addLog('Replaced duplicate opening greeting with fallback');
+        finalResponse = fallback;
+      } else if (isTooSimilar(lastDavidResponseRef.current, response)) {
+        const fallback = pickFallback();
         log('Anti-repeat triggered — swapping response', `"${response.substring(0, 60)}" → "${fallback}"`);
         finalResponse = fallback;
       }
