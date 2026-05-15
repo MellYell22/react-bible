@@ -12,11 +12,11 @@ export default function ChatScreen({ navigation }: any) {
 
   useEffect(() => {
     const greetings = [
-      "Hey. I'm glad you came by.",
-      "Good to see you again. What's been weighing on you lately?",
-      "Take your time. What's been going on?",
-      "I'm glad you're here. How are you really doing today?",
-      "Good to sit with you for a minute. What's been on your heart?"
+      "Hey. I'm here with you.",
+      "Hey, good to see you.",
+      "I'm here. What's on your mind?",
+      "Hey. Talk to me.",
+      "Good to see you. What's going on?"
     ];
     const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
     setMessages([{ role: 'assistant', content: randomGreeting }]);

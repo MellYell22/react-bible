@@ -48,18 +48,17 @@ const cleanFirstName = (value?: string | null): string => {
 
 const getDavidGreeting = (firstName?: string): string => {
   const namedGreetings = [
-    `Hey, ${firstName}. Good to hear your voice. What's been weighing on you lately?`,
-    `Good to see you again, ${firstName}. How are you really doing today?`,
-    `${firstName}, I'm glad you came by. What's been on your heart?`,
+    `Hey, ${firstName}. I'm here with you.`,
+    `Hey, ${firstName}. Good to see you.`,
+    `${firstName}, I'm here. What's on your mind?`,
   ];
 
   const namelessGreetings = [
-    `Hey. I'm glad you came by.`,
-    `Good to hear your voice again. What's been going on?`,
-    `Take your time. What's been weighing on you lately?`,
-    `Hey. How are you really doing today?`,
-    `I'm here with you. What's been on your heart?`,
-    `Good to see you again. What have you been carrying lately?`,
+    `Hey. I'm here with you.`,
+    `Hey, good to see you.`,
+    `I'm here. What's on your mind?`,
+    `Hey. Talk to me.`,
+    `Good to see you. What's going on?`,
   ];
 
   const greetings = firstName ? [...namedGreetings, ...namelessGreetings] : namelessGreetings;
