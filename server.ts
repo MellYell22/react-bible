@@ -337,7 +337,7 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
 // API Routes
 app.get("/api/health", (req, res) => {
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY || process.env.ELEVEN_LABS_API_KEY;
-  const elevenLabsVoiceId = process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID || 'vek32IUMncn9S8XIcFt5 (default)';
+  const elevenLabsVoiceId = process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID || '6j5m6aQo2Q3NyLs6PYOz (default)';
   res.json({ 
     status: "ok", 
     stripeConfigured: !!getStripe(),
@@ -554,7 +554,7 @@ app.post("/api/speech", async (req, res) => {
     }
 
     // Use custom David voice ID with env var fallback
-    const defaultVoiceId = 'vek32IUMncn9S8XIcFt5'; // Custom David voice (updated)
+    const defaultVoiceId = '6j5m6aQo2Q3NyLs6PYOz'; // Custom David voice (updated)
     const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID || defaultVoiceId;
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?optimize_streaming_latency=3`;
 
