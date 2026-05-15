@@ -1,8 +1,5 @@
 import { prepareDavidTtsPayload } from '../src/utils/davidSpeechDelivery';
-import {
-  DAVID_ELEVENLABS_VOICE_ID,
-  resolveDavidVoiceId,
-} from '../src/constants/elevenLabsVoice';
+import { resolveDavidVoiceId } from '../src/constants/elevenLabsVoice';
 
 export default async function handler(req: any, res: any) {
   // CORS headers if needed
@@ -40,11 +37,9 @@ export default async function handler(req: any, res: any) {
     // Log key presence without leaking the value
     console.log(`[Speech API] API Key found. Length: ${apiKey.length}, Starts with: ${apiKey.substring(0, 3)}...`);
 
-    const envVoiceId = process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID;
-    let voiceId = resolveDavidVoiceId(envVoiceId);
-    if (envVoiceId?.trim() && envVoiceId.trim() !== voiceId) {
-      console.warn(`[Speech API] Deprecated ELEVENLABS_VOICE_ID "${envVoiceId}" — using ${voiceId}`);
-    }
+    const voiceId = resolveDavidVoiceId(
+      process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID,
+    );
     console.log(`[Speech API] Using Voice ID: ${voiceId}`);
 
     // Apply SSML delivery unless client already sent SSML or plain safety text
@@ -80,21 +75,7 @@ export default async function handler(req: any, res: any) {
         }),
       });
 
-    let response = await synthesize(voiceId);
-
-    // Retry once with default David voice if env voice ID is invalid
-    if (
-      !response.ok
-      && response.status === 404
-      && voiceId !== DAVID_ELEVENLABS_VOICE_ID
-    ) {
-      const errText = await response.text();
-      if (/voice_not_found/i.test(errText)) {
-        console.warn(`[Speech API] Voice ${voiceId} not found — retrying with ${DAVID_ELEVENLABS_VOICE_ID}`);
-        voiceId = DAVID_ELEVENLABS_VOICE_ID;
-        response = await synthesize(voiceId);
-      }
-    }
+    const response = await synthesize(voiceId);
 
     // 4. Handle ElevenLabs errors explicitly
     if (!response.ok) {

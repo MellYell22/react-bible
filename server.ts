@@ -8,10 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import { DAVID_PERSONALITY_PROMPT, DAVID_CHAT_TEMPERATURE } from './src/constants/davidPersona';
 import { prepareDavidTtsPayload } from './src/utils/davidSpeechDelivery';
-import {
-  DAVID_ELEVENLABS_VOICE_ID,
-  resolveDavidVoiceId,
-} from './src/constants/elevenLabsVoice';
+import { resolveDavidVoiceId } from './src/constants/elevenLabsVoice';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -528,11 +525,9 @@ app.post("/api/speech", async (req, res) => {
       throw new Error("ElevenLabs API Key is not configured.");
     }
 
-    const envVoiceId = process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID;
-    let VOICE_ID = resolveDavidVoiceId(envVoiceId);
-    if (envVoiceId?.trim() && envVoiceId.trim() !== VOICE_ID) {
-      console.warn(`[ElevenLabs] Deprecated ELEVENLABS_VOICE_ID "${envVoiceId}" — using ${VOICE_ID}`);
-    }
+    const VOICE_ID = resolveDavidVoiceId(
+      process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID,
+    );
     // eleven_flash_v2_5 is ElevenLabs' lowest-latency model (~75ms vs ~200ms for turbo)
     const alreadySsml = /<speak[\s>]/i.test(text);
     const ttsPayload = alreadySsml
@@ -565,23 +560,11 @@ app.post("/api/speech", async (req, res) => {
         },
       );
 
-    let response = await synthesize(VOICE_ID);
+    const response = await synthesize(VOICE_ID);
 
     if (!response.ok) {
-      let errorText = await response.text();
-      if (
-        response.status === 404
-        && VOICE_ID !== DAVID_ELEVENLABS_VOICE_ID
-        && /voice_not_found/i.test(errorText)
-      ) {
-        console.warn(`[ElevenLabs] Voice ${VOICE_ID} not found — retrying with ${DAVID_ELEVENLABS_VOICE_ID}`);
-        VOICE_ID = DAVID_ELEVENLABS_VOICE_ID;
-        response = await synthesize(VOICE_ID);
-        if (!response.ok) errorText = await response.text();
-      }
-      if (!response.ok) {
-        throw new Error(`ElevenLabs API Error: ${response.status} - ${errorText}`);
-      }
+      const errorText = await response.text();
+      throw new Error(`ElevenLabs API Error: ${response.status} - ${errorText}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -638,7 +621,7 @@ async function startServer() {
       console.log(`🗄️ Supabase: ${supabase ? "✅ Configured" : "❌ Missing SUPABASE_URL/SERVICE_ROLE_KEY"}`);
       console.log(`🤖 OpenAI: ${process.env.OPENAI_API_KEY ? "✅ Configured" : "❌ Missing OPENAI_API_KEY"}`);
       console.log(`🎙️ ElevenLabs: ${(process.env.ELEVENLABS_API_KEY || process.env.ELEVEN_LABS_API_KEY) ? "✅ Configured" : "❌ Missing ELEVENLABS_API_KEY or ELEVEN_LABS_API_KEY"}`);
-      console.log(`🗣️ ElevenLabs Voice ID: ${(process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID) ? "✅ Configured" : "ℹ️ Using default David voice"}`);
+      console.log(`🗣️ ElevenLabs Voice ID: ${resolveDavidVoiceId(process.env.ELEVENLABS_VOICE_ID || process.env.ELEVEN_LABS_VOICE_ID)}`);
       console.log("--------------------------\n");
     });
   }
