@@ -460,16 +460,53 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const audioFile = new File([rawBody], `audio.${ext}`, { type: mimeType });
 
+    const MIN_AUDIO_BYTES = 5000;
+    const MIN_MEANINGFUL_WORDS = 2;
+    const MIN_MEANINGFUL_LETTERS = 8;
+    const junkPatterns = [
+      /^[\s.…,!?*-]+$/,
+      /^(thank you|thanks for watching|subscribe|you|bye|goodbye|okay|ok|um+|uh+|hmm+|ah+|oh+)[.!?\s]*$/i,
+      /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
+      /^(the|a|an|i|it|so|and|but|or|well)[.!?\s]*$/i,
+    ];
+    const noisePatterns = [
+      /^(a+h*|u+h*m*|hmm*|mm+|mhm+|uh+h*|oh+h*)[.!?\s]*$/i,
+      /^(cough|coughing|\*cough\*|clears? throat|sniff|sneeze|burp|yawn)[.!?\s]*$/i,
+      /^(breathing|inhales?|exhales?|sigh|sighs)[.!?\s]*$/i,
+    ];
+
+    const isMeaningful = (text: string): boolean => {
+      const t = text.trim();
+      const n = t.toLowerCase();
+      if (!t || n.length < 3) return false;
+      if (junkPatterns.some(re => re.test(n)) || noisePatterns.some(re => re.test(n))) return false;
+      const words = t.split(/\s+/).filter(Boolean);
+      if (words.length < MIN_MEANINGFUL_WORDS) return false;
+      if (t.replace(/[^a-zA-Z]/g, '').length < MIN_MEANINGFUL_LETTERS) return false;
+      return true;
+    };
+
+    if (rawBody.length < MIN_AUDIO_BYTES) {
+      return res.json({ transcript: '', rejected: true, reason: 'audio_too_small' });
+    }
+
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: 'whisper-1',
       language: 'en',
       response_format: 'json',
+      prompt: 'Spiritual conversation in English.',
+      temperature: 0,
     });
 
-    const transcript = transcription.text?.trim() || '';
-    console.log(`[Transcribe] "${transcript}"`);
-    res.json({ transcript });
+    const rawTranscript = transcription.text?.trim() || '';
+    const accepted = isMeaningful(rawTranscript);
+    console.log(`[Transcribe] raw="${rawTranscript}" accepted=${accepted}`);
+    res.json({
+      transcript: accepted ? rawTranscript : '',
+      rejected: !accepted,
+      reason: accepted ? undefined : 'not_meaningful',
+    });
   } catch (error: any) {
     console.error('[Transcribe] Error:', error.message);
     res.status(500).json({ error: 'Transcription failed', message: error.message });

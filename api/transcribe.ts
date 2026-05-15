@@ -1,5 +1,53 @@
 import OpenAI from 'openai';
 
+const JUNK_TRANSCRIPT_PATTERNS = [
+  /^[\s.…,!?*-]+$/,
+  /^(thank you|thanks for watching|subscribe|you|bye|goodbye|okay|ok|um+|uh+|hmm+|ah+|oh+)[.!?\s]*$/i,
+  /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
+  /^(the|a|an|i|it|so|and|but|or|well)[.!?\s]*$/i,
+];
+
+const NOISE_TRANSCRIPT_PATTERNS = [
+  /^(a+h*|u+h*m*|hmm*|mm+|mhm+|uh+h*|oh+h*)[.!?\s]*$/i,
+  /^(cough|coughing|\*cough\*|clears? throat|sniff|sneeze|burp|yawn)[.!?\s]*$/i,
+  /^(breathing|inhales?|exhales?|sigh|sighs)[.!?\s]*$/i,
+  /^\[.*\]$/,
+];
+
+const MIN_MEANINGFUL_WORDS = 2;
+const MIN_MEANINGFUL_LETTERS = 8;
+const MIN_AUDIO_BYTES = 5000;
+
+function isJunkTranscript(normalized: string): boolean {
+  if (!normalized || normalized.length < 3) return true;
+  if (JUNK_TRANSCRIPT_PATTERNS.some(re => re.test(normalized))) return true;
+  if (NOISE_TRANSCRIPT_PATTERNS.some(re => re.test(normalized))) return true;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length === 1 && words[0].length <= 4) return true;
+  return false;
+}
+
+function isMeaningfulTranscript(transcript: string): boolean {
+  const normalized = transcript.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (isJunkTranscript(normalized)) return false;
+  const words = transcript.trim().split(/\s+/).filter(Boolean);
+  if (words.length < MIN_MEANINGFUL_WORDS) return false;
+  const letters = transcript.replace(/[^a-zA-Z]/g, '');
+  if (letters.length < MIN_MEANINGFUL_LETTERS) return false;
+  return true;
+}
+
+function sanitizeTranscript(raw: string): { transcript: string; rejected?: boolean; reason?: string } {
+  const transcript = raw.trim();
+  if (!transcript) {
+    return { transcript: '', rejected: true, reason: 'empty' };
+  }
+  if (!isMeaningfulTranscript(transcript)) {
+    return { transcript: '', rejected: true, reason: 'not_meaningful' };
+  }
+  return { transcript };
+}
+
 // Vercel serverless functions have a 4.5MB body limit by default.
 // Audio recordings of 30 seconds or less are well within this limit.
 export const config = {
@@ -81,6 +129,11 @@ export default async function handler(req: any, res: any) {
 
     console.log(`[Transcribe] Audio buffer: ${audioBuffer.length} bytes, type: ${mimeType}`);
 
+    // Tiny blobs are almost always silence / mic noise — skip Whisper entirely
+    if (audioBuffer.length < MIN_AUDIO_BYTES) {
+      return res.status(200).json({ transcript: '', rejected: true, reason: 'audio_too_small' });
+    }
+
     // Determine file extension from MIME type
     const ext = mimeTypeToExt(mimeType);
     const audioFilename = filename.includes('.') ? filename : `audio.${ext}`;
@@ -96,12 +149,16 @@ export default async function handler(req: any, res: any) {
       model: 'whisper-1',
       language: 'en',
       response_format: 'json',
+      // Neutral prompt reduces conversational hallucinations on non-speech audio
+      prompt: 'Spiritual conversation in English.',
+      temperature: 0,
     });
 
-    const transcript = transcription.text?.trim() || '';
-    console.log(`[Transcribe] Transcript: "${transcript}"`);
+    const rawTranscript = transcription.text?.trim() || '';
+    const sanitized = sanitizeTranscript(rawTranscript);
+    console.log(`[Transcribe] Raw: "${rawTranscript}" → ${sanitized.rejected ? `rejected (${sanitized.reason})` : 'accepted'}`);
 
-    return res.status(200).json({ transcript });
+    return res.status(200).json(sanitized);
 
   } catch (error: any) {
     console.error('[Transcribe] Error:', error.message);

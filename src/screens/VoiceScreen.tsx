@@ -9,6 +9,13 @@ import { getChatResponse, generateSpeech } from '../services/ai';
 import { hasProAccess } from '../utils/tier';
 import { saveAIFeedback } from '../services/supabase';
 import { useUser } from '../UserContext';
+import {
+  isJunkTranscript,
+  isMeaningfulTranscript,
+  isDuplicateTranscript,
+  looksLikeOpeningGreeting,
+  normalizeTranscript,
+} from '../utils/voiceTranscript';
 
 // ─── Logging ────────────────────────────────────────────────────────────────
 // All voice events are prefixed with [David] for easy filtering in DevTools.
@@ -110,16 +117,76 @@ export default function VoiceScreen({ route, navigation }: any) {
   // Retry tracking for speech recognition network errors
   const micRetryCountRef = useRef(0);
   const MAX_MIC_RETRIES = 1; // Show text fallback after 1 network failure (network errors are persistent)
-  // Silence detection for automatic speech-end detection
+  // Silence / speech-end detection (MediaRecorder + AudioContext)
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const SILENCE_THRESHOLD = 0.01; // RMS threshold for silence
-  const SILENCE_DURATION = 700; // ms of silence before treating as end-of-speech (was 1500)
+  const isProcessingVoiceRef = useRef(false);
+  const lastTranscriptRef = useRef<string>('');
+  const emptyTranscriptStreakRef = useRef(0);
+  const listenRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const hasGreetedRef = useRef(false);
+  const lastResponseAtRef = useRef(0);
+  const recentTranscriptsRef = useRef<string[]>([]);
+
+  // RMS thresholds — tuned to ignore breath/cough bursts, require sustained speech
+  const SPEECH_RMS_THRESHOLD = 0.024;
+  const SILENCE_RMS_THRESHOLD = 0.007;
+  const SILENCE_DURATION_MS = 2000;
+  const MIN_SPEECH_MS = 900;
+  const MIN_SUSTAINED_SPEECH_FRAMES = 6;
+  const MIN_RECORDING_MS = 2000;
+  const MIN_AUDIO_BYTES = 5000;
+  const POST_TTS_MIC_DELAY_MS = 1000;
+  const RESPONSE_COOLDOWN_MS = 1500;
+  const MIC_RESTART_BASE_MS = 900;
+  const MIC_RESTART_MAX_MS = 4500;
+  const NO_SPEECH_DISCARD_MS = 15000;
 
   // ── Logging helper (also pushes to on-screen debug panel) ────────────────
   const addLog = (msg: string) => {
     const full = log(msg);
     setDebugLogs(prev => [full, ...prev].slice(0, 30));
+  };
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const isInResponseCooldown = (): boolean => {
+    const elapsed = Date.now() - lastResponseAtRef.current;
+    return lastResponseAtRef.current > 0 && elapsed < RESPONSE_COOLDOWN_MS;
+  };
+
+  const markResponseCompleted = () => {
+    lastResponseAtRef.current = Date.now();
+  };
+
+  const clearListenRetry = () => {
+    if (listenRetryTimeoutRef.current) {
+      clearTimeout(listenRetryTimeoutRef.current);
+      listenRetryTimeoutRef.current = null;
+    }
+  };
+
+  /** Re-open mic only when safe; backs off after empty/junk transcripts. */
+  const scheduleListenRetry = (reason: string) => {
+    if (!isConnectedRef.current) return;
+    if (isDavidSpeakingRef.current || isProcessingVoiceRef.current) return;
+
+    clearListenRetry();
+    const streak = emptyTranscriptStreakRef.current;
+    const delay = Math.min(
+      MIC_RESTART_MAX_MS,
+      MIC_RESTART_BASE_MS + streak * 400,
+    );
+    addLog(`${reason} — retry mic in ${delay}ms`);
+    listenRetryTimeoutRef.current = setTimeout(() => {
+      listenRetryTimeoutRef.current = null;
+      if (isConnectedRef.current && !isDavidSpeakingRef.current && !isProcessingVoiceRef.current) {
+        startListening();
+      }
+    }, delay);
   };
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -183,12 +250,32 @@ export default function VoiceScreen({ route, navigation }: any) {
     setIsDavidThinking(false);
     setIsDavidSpeaking(false);
     isDavidSpeakingRef.current = false;
+    isProcessingVoiceRef.current = false;
+    lastTranscriptRef.current = '';
+    recentTranscriptsRef.current = [];
+    lastResponseAtRef.current = 0;
+    hasGreetedRef.current = false;
+    emptyTranscriptStreakRef.current = 0;
+    clearListenRetry();
 
-    addLog('Starting David voice session with opening greeting');
+    addLog('Starting David voice session');
 
     try {
       isConnectedRef.current = true;
       setIsConnected(true);
+
+      const beginListening = () => {
+        setIsConnecting(false);
+        setConversationState('listening');
+        setTimeout(() => startListening(), POST_TTS_MIC_DELAY_MS);
+      };
+
+      // One opening greeting per session only
+      if (hasGreetedRef.current) {
+        log('Greeting already played this session — listening');
+        beginListening();
+        return;
+      }
 
       // Play David's opening greeting. Use only a real metadata name; never
       // derive a spoken name from the user's email address or email username.
@@ -203,7 +290,8 @@ export default function VoiceScreen({ route, navigation }: any) {
         || cleanFirstName(identityData.full_name)
         || cleanFirstName(identityData.name);
       const greeting = getDavidGreeting(firstName);
-      log('Playing opening greeting', greeting);
+      hasGreetedRef.current = true;
+      log('Playing opening greeting (once per session)', greeting);
 
       setIsDavidSpeaking(true);
       isDavidSpeakingRef.current = true;
@@ -222,14 +310,9 @@ export default function VoiceScreen({ route, navigation }: any) {
             setIsDavidSpeaking(false);
             URL.revokeObjectURL(audioUrl);
             currentAudioRef.current = null;
-            setConversationState('listening');
-            setIsConnecting(false);
-
-            // Add David's greeting as first assistant message
             setMessages([{ role: 'assistant', content: greeting }]);
-
-            // Now start listening for user input
-            setTimeout(() => startListening(), 300);
+            markResponseCompleted();
+            beginListening();
           };
 
           audio.onerror = () => {
@@ -237,10 +320,9 @@ export default function VoiceScreen({ route, navigation }: any) {
             isDavidSpeakingRef.current = false;
             setIsDavidSpeaking(false);
             currentAudioRef.current = null;
-            setConversationState('listening');
-            setIsConnecting(false);
             setMessages([{ role: 'assistant', content: greeting }]);
-            setTimeout(() => startListening(), 300);
+            markResponseCompleted();
+            beginListening();
           };
 
           const playPromise = audio.play();
@@ -250,28 +332,24 @@ export default function VoiceScreen({ route, navigation }: any) {
               isDavidSpeakingRef.current = false;
               setIsDavidSpeaking(false);
               currentAudioRef.current = null;
-              setConversationState('listening');
-              setIsConnecting(false);
               setMessages([{ role: 'assistant', content: greeting }]);
-              setTimeout(() => startListening(), 300);
+              markResponseCompleted();
+              beginListening();
             });
           }
         } else {
-          // TTS failed, skip greeting and start listening
-          log('Opening greeting TTS failed — starting mic without greeting');
+          log('Opening greeting TTS failed — listening without audio greeting');
           isDavidSpeakingRef.current = false;
           setIsDavidSpeaking(false);
-          setConversationState('listening');
-          setIsConnecting(false);
-          setTimeout(() => startListening(), 300);
+          setMessages([{ role: 'assistant', content: greeting }]);
+          markResponseCompleted();
+          beginListening();
         }
       } catch (err: any) {
         log('Opening greeting error', err?.message);
         isDavidSpeakingRef.current = false;
         setIsDavidSpeaking(false);
-        setConversationState('listening');
-        setIsConnecting(false);
-        setTimeout(() => startListening(), 300);
+        beginListening();
       }
 
     } catch (err: any) {
@@ -334,55 +412,73 @@ export default function VoiceScreen({ route, navigation }: any) {
 
   // ── Handle voice input (transcript → AI → TTS) ────────────────────────────
   const handleVoiceInput = async (text: string) => {
-    // Validate input
-    if (!text || !text.trim()) {
-      addLog('Empty transcript — restarting mic');
-      setConversationState('listening');
-      if (isConnectedRef.current) {
-        setTimeout(() => startListening(), 300);
-      }
-      return;
-    }
-
     const trimmedText = text.trim();
 
-    // ── Transcript filter: ignore filler/noise/too-short inputs ──────────────
-    if (!isTranscriptMeaningful(trimmedText)) {
-      addLog(`Transcript filtered (filler/noise): "${trimmedText}" — restarting mic quietly`);
-      log('Transcript filtered — not meaningful enough to send to OpenAI', trimmedText);
+    if (isInResponseCooldown()) {
+      addLog('Ignored — response cooldown active');
       setConversationState('listening');
-      if (isConnectedRef.current) {
-        setTimeout(() => startListening(), 300);
-      }
+      scheduleListenRetry('Response cooldown');
       return;
     }
 
-    log('Transcript received', trimmedText);
+    if (
+      !trimmedText ||
+      isJunkTranscript(trimmedText) ||
+      !isMeaningfulTranscript(trimmedText) ||
+      !isTranscriptMeaningful(trimmedText)
+    ) {
+      emptyTranscriptStreakRef.current += 1;
+      addLog('Rejected transcript (not meaningful)');
+      setConversationState('listening');
+      scheduleListenRetry('No usable speech');
+      return;
+    }
+
+    const normalized = normalizeTranscript(trimmedText);
+    if (isDuplicateTranscript(normalized, lastTranscriptRef.current, recentTranscriptsRef.current)) {
+      emptyTranscriptStreakRef.current += 1;
+      addLog('Rejected duplicate transcript');
+      setConversationState('listening');
+      scheduleListenRetry('Duplicate transcript');
+      return;
+    }
+
+    lastTranscriptRef.current = normalized;
+    recentTranscriptsRef.current = [normalized, ...recentTranscriptsRef.current].slice(0, 5);
+    emptyTranscriptStreakRef.current = 0;
+    log('Transcript accepted', trimmedText);
 
     const newUserMessage: ChatMessage = { role: 'user', content: trimmedText };
+    const history = [
+      ...messagesRef.current.slice(-10).map(m => ({ role: m.role, content: m.content })),
+      newUserMessage,
+    ];
+
     setMessages(prev => [...prev, newUserMessage]);
     setIsDavidThinking(true);
+    isProcessingVoiceRef.current = true;
     setConversationState('processing');
 
     try {
-      const recentMessages = messages.slice(-10);
-      const history = [
-        ...recentMessages.map(m => ({ role: m.role, content: m.content })),
-        newUserMessage,
-      ];
-
       log('AI request sent', `history length: ${history.length}`);
 
       const response = await getChatResponse(history, profile?.preferred_response_length || 'short');
 
-      // Validate response
       if (!response || !response.trim()) {
-        addLog('Empty AI response — restarting mic');
+        addLog('Empty AI response');
         setIsDavidThinking(false);
+        isProcessingVoiceRef.current = false;
         setConversationState('listening');
-        if (isConnectedRef.current) {
-          setTimeout(() => startListening(), 500);
-        }
+        scheduleListenRetry('Empty AI response');
+        return;
+      }
+
+      if (hasGreetedRef.current && looksLikeOpeningGreeting(response)) {
+        addLog('Skipped greeting-like AI reply (one greeting per session)');
+        setIsDavidThinking(false);
+        isProcessingVoiceRef.current = false;
+        setConversationState('listening');
+        scheduleListenRetry('Greeting-like response');
         return;
       }
 
@@ -408,11 +504,9 @@ export default function VoiceScreen({ route, navigation }: any) {
     } catch (err: any) {
       addLog(`AI chat error: ${err?.message}`);
       setIsDavidThinking(false);
+      isProcessingVoiceRef.current = false;
       setConversationState('listening');
-      // Restart listening even after AI error so the session stays alive
-      if (isConnectedRef.current) {
-        setTimeout(() => startListening(), 500);
-      }
+      scheduleListenRetry('AI error');
     }
   };
 
@@ -441,7 +535,8 @@ export default function VoiceScreen({ route, navigation }: any) {
         setIsDavidSpeaking(false);
         setConversationState('listening');
         setError("David's voice is unavailable right now. Check the ElevenLabs API key.");
-        if (isConnectedRef.current) setTimeout(() => startListening(), 500);
+        isProcessingVoiceRef.current = false;
+        if (isConnectedRef.current) scheduleListenRetry('TTS failed');
         return;
       }
 
@@ -465,12 +560,14 @@ export default function VoiceScreen({ route, navigation }: any) {
       audio.onended = () => {
         log('Audio playback ended — restarting mic');
         isDavidSpeakingRef.current = false;
+        isProcessingVoiceRef.current = false;
         setIsDavidSpeaking(false);
         setConversationState('listening');
         URL.revokeObjectURL(audioUrl);
         currentAudioRef.current = null;
+        markResponseCompleted();
         if (isConnectedRef.current) {
-          setTimeout(() => startListening(), 300);
+          setTimeout(() => startListening(), POST_TTS_MIC_DELAY_MS);
         }
       };
 
@@ -479,11 +576,12 @@ export default function VoiceScreen({ route, navigation }: any) {
         log('Audio playback error', errMsg);
         addLog(`Audio playback failed: ${errMsg}`);
         isDavidSpeakingRef.current = false;
+        isProcessingVoiceRef.current = false;
         setIsDavidSpeaking(false);
         setConversationState('listening');
         currentAudioRef.current = null;
         setError("Audio playback failed. This may be a browser autoplay restriction.");
-        if (isConnectedRef.current) setTimeout(() => startListening(), 500);
+        if (isConnectedRef.current) scheduleListenRetry('Playback error');
       };
 
       log('Calling audio.play()');
@@ -494,11 +592,12 @@ export default function VoiceScreen({ route, navigation }: any) {
           log('audio.play() rejected (autoplay policy?)', playErr?.message);
           addLog(`audio.play() blocked: ${playErr?.message}. Try tapping the screen first.`);
           isDavidSpeakingRef.current = false;
+          isProcessingVoiceRef.current = false;
           setIsDavidSpeaking(false);
           setConversationState('listening');
           currentAudioRef.current = null;
           setError("Autoplay blocked. Tap anywhere on the screen and try again.");
-          if (isConnectedRef.current) setTimeout(() => startListening(), 500);
+          if (isConnectedRef.current) scheduleListenRetry('Autoplay blocked');
         });
       }
 
@@ -506,10 +605,11 @@ export default function VoiceScreen({ route, navigation }: any) {
       log('speakMessage exception', err?.message);
       addLog(`TTS exception: ${err?.message}`);
       isDavidSpeakingRef.current = false;
+      isProcessingVoiceRef.current = false;
       setIsDavidSpeaking(false);
       setConversationState('listening');
       setError("David's voice encountered an unexpected error.");
-      if (isConnectedRef.current) setTimeout(() => startListening(), 500);
+      if (isConnectedRef.current) scheduleListenRetry('TTS exception');
     }
   };
 
@@ -532,10 +632,21 @@ export default function VoiceScreen({ route, navigation }: any) {
       log('startListening blocked — David is still speaking');
       return;
     }
+    if (isProcessingVoiceRef.current) {
+      log('startListening blocked — still processing prior utterance');
+      return;
+    }
+    if (isInResponseCooldown()) {
+      log('startListening delayed — response cooldown');
+      scheduleListenRetry('Response cooldown');
+      return;
+    }
     if (!isConnectedRef.current) {
       log('startListening blocked — session not connected');
       return;
     }
+
+    clearListenRetry();
 
     // Stop any existing recorder
     if (recognitionRef.current) {
@@ -543,7 +654,6 @@ export default function VoiceScreen({ route, navigation }: any) {
       recognitionRef.current = null;
     }
 
-    // Clear any pending silence timeout
     if (silenceTimeoutRef.current) {
       clearTimeout(silenceTimeoutRef.current);
       silenceTimeoutRef.current = null;
@@ -585,92 +695,170 @@ export default function VoiceScreen({ route, navigation }: any) {
     }
 
     const chunks: Blob[] = [];
+    let recordingStartedAt = 0;
+    let hasDetectedSpeech = false;
+    let speechMsAccumulated = 0;
+    let consecutiveSpeechFrames = 0;
+    let maxConsecutiveSpeechFrames = 0;
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
     recorder.onstart = () => {
-      log('Microphone activated — listening with silence detection');
+      recordingStartedAt = Date.now();
+      log('Microphone activated — waiting for real speech before end-of-utterance');
       setConversationState('listening');
       addLog('Listening…');
       setError(null);
 
-      // Set up silence detection using AudioContext
       try {
         const audioContext = audioContextRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
         if (!audioContextRef.current) audioContextRef.current = audioContext;
 
-        const analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(stream);
-        const processor = audioContext.createScriptProcessor(2048, 1, 1); // smaller buffer = faster silence detection
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        const muteGain = audioContext.createGain();
+        muteGain.gain.value = 0;
 
-        analyser.fftSize = 2048;
-        source.connect(analyser);
-        analyser.connect(processor);
-        processor.connect(audioContext.destination);
+        source.connect(processor);
+        processor.connect(muteGain);
+        muteGain.connect(audioContext.destination);
 
         audioProcessorRef.current = processor;
 
+        const frameMs = (4096 / audioContext.sampleRate) * 1000;
+        const silenceFramesNeeded = Math.ceil(SILENCE_DURATION_MS / frameMs);
         let consecutiveSilenceFrames = 0;
-        // How many ScriptProcessor frames fit in SILENCE_DURATION ms
-        // msPerFrame = (bufferSize / sampleRate) * 1000
-        const msPerFrame = (2048 / audioContext.sampleRate) * 1000;
-        const silenceFramesNeeded = Math.ceil(SILENCE_DURATION / msPerFrame);
 
         processor.onaudioprocess = (e) => {
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          analyser.getByteFrequencyData(dataArray);
+          if (recorder.state !== 'recording') return;
 
-          // Calculate average frequency magnitude
-          const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          const input = e.inputBuffer.getChannelData(0);
+          const rms = calculateRMS(input);
+          const elapsedMs = Date.now() - recordingStartedAt;
 
-          if (average < 40) { // Silence threshold in frequency domain (raised for faster trigger)
-            consecutiveSilenceFrames++;
-            if (consecutiveSilenceFrames >= silenceFramesNeeded) {
-              log('Silence detected — stopping recording');
-              processor.disconnect();
-              recorder.stop();
+          if (rms >= SPEECH_RMS_THRESHOLD) {
+            consecutiveSpeechFrames++;
+            maxConsecutiveSpeechFrames = Math.max(
+              maxConsecutiveSpeechFrames,
+              consecutiveSpeechFrames,
+            );
+            if (consecutiveSpeechFrames >= 2) {
+              speechMsAccumulated += frameMs;
             }
-          } else {
+            if (
+              maxConsecutiveSpeechFrames >= MIN_SUSTAINED_SPEECH_FRAMES &&
+              speechMsAccumulated >= MIN_SPEECH_MS
+            ) {
+              hasDetectedSpeech = true;
+            }
             consecutiveSilenceFrames = 0;
+            return;
+          }
+
+          consecutiveSpeechFrames = 0;
+
+          if (rms <= SILENCE_RMS_THRESHOLD) {
+            consecutiveSilenceFrames++;
+          } else {
+            consecutiveSilenceFrames = Math.max(0, consecutiveSilenceFrames - 1);
+          }
+
+          const speechLongEnough =
+            hasDetectedSpeech &&
+            speechMsAccumulated >= MIN_SPEECH_MS &&
+            maxConsecutiveSpeechFrames >= MIN_SUSTAINED_SPEECH_FRAMES;
+          const recordingLongEnough = elapsedMs >= MIN_RECORDING_MS;
+
+          if (
+            speechLongEnough &&
+            recordingLongEnough &&
+            consecutiveSilenceFrames >= silenceFramesNeeded
+          ) {
+            log('End of utterance (speech + silence) — stopping recording', {
+              speechMs: Math.round(speechMsAccumulated),
+              elapsedMs,
+            });
+            processor.disconnect();
+            muteGain.disconnect();
+            source.disconnect();
+            if (recorder.state === 'recording') recorder.stop();
           }
         };
+
+        // If user never speaks, do not send ambient audio to Whisper
+        silenceTimeoutRef.current = setTimeout(() => {
+          if (recorder.state !== 'recording' || hasDetectedSpeech) return;
+          log('No speech detected — discarding recording');
+          processor.disconnect();
+          muteGain.disconnect();
+          source.disconnect();
+          recorder.stop();
+        }, NO_SPEECH_DISCARD_MS);
       } catch (err) {
         log('Silence detection setup failed', (err as any)?.message);
-        // Continue without silence detection
       }
     };
 
     recorder.onstop = async () => {
-      log('Recording stopped — sending to Whisper');
-      setConversationState('processing');
-      addLog('Transcribing with Whisper…');
+      const recordingDurationMs = Date.now() - recordingStartedAt;
+      log('Recording stopped', { recordingDurationMs });
+
       stream.getTracks().forEach(t => t.stop());
 
-      // Clean up audio processor
       if (audioProcessorRef.current) {
         audioProcessorRef.current.disconnect();
         audioProcessorRef.current = null;
       }
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+        silenceTimeoutRef.current = null;
+      }
 
       if (!isConnectedRef.current) return;
 
-      if (chunks.length === 0) {
-        addLog('No audio recorded — restarting mic');
+      if (isInResponseCooldown()) {
+        addLog('Recording discarded — response cooldown');
         setConversationState('listening');
-        setTimeout(() => startListening(), 300);
+        scheduleListenRetry('Response cooldown');
+        return;
+      }
+
+      if (recordingDurationMs < MIN_RECORDING_MS) {
+        emptyTranscriptStreakRef.current += 1;
+        addLog(`Recording too short (${recordingDurationMs}ms)`);
+        setConversationState('listening');
+        scheduleListenRetry('Recording too short');
+        return;
+      }
+
+      if (!hasDetectedSpeech) {
+        emptyTranscriptStreakRef.current += 1;
+        addLog('Recording discarded — no speech detected');
+        setConversationState('listening');
+        scheduleListenRetry('No speech in recording');
+        return;
+      }
+
+      if (chunks.length === 0) {
+        emptyTranscriptStreakRef.current += 1;
+        setConversationState('listening');
+        scheduleListenRetry('No audio chunks');
         return;
       }
 
       const audioBlob = new Blob(chunks, { type: mimeType || 'audio/webm' });
       log('Audio blob size', `${audioBlob.size} bytes`);
 
-      if (audioBlob.size < 1000) {
-        addLog('Audio too short — restarting mic');
+      if (audioBlob.size < MIN_AUDIO_BYTES) {
+        emptyTranscriptStreakRef.current += 1;
+        addLog('Audio too small — likely noise only');
         setConversationState('listening');
-        setTimeout(() => startListening(), 300);
+        scheduleListenRetry('Audio too small');
         return;
       }
 
-      setIsDavidThinking(true);
+      setConversationState('processing');
+      addLog('Transcribing…');
+      isProcessingVoiceRef.current = true;
       log('Transcription request sent', `${audioBlob.size} bytes`);
 
       try {
@@ -691,28 +879,46 @@ export default function VoiceScreen({ route, navigation }: any) {
         const transcript = data.transcript?.trim() || '';
         log('Transcript received', `"${transcript}"`);
 
-        setIsDavidThinking(false);
+        isProcessingVoiceRef.current = false;
 
-        if (!transcript) {
-          addLog('Empty transcript — restarting mic');
+        if (!transcript || data.rejected) {
+          emptyTranscriptStreakRef.current += 1;
+          addLog(data.reason ? `Transcript rejected: ${data.reason}` : 'Empty transcript');
           setConversationState('listening');
-          if (isConnectedRef.current) setTimeout(() => startListening(), 300);
+          scheduleListenRetry('No transcript');
           return;
         }
 
-        // Success — reset error state
+        if (isJunkTranscript(transcript) || !isMeaningfulTranscript(transcript)) {
+          emptyTranscriptStreakRef.current += 1;
+          addLog('Transcript rejected as junk/noise');
+          setConversationState('listening');
+          scheduleListenRetry('Not meaningful');
+          return;
+        }
+
+        const normalized = normalizeTranscript(transcript);
+        if (isDuplicateTranscript(normalized, lastTranscriptRef.current, recentTranscriptsRef.current)) {
+          emptyTranscriptStreakRef.current += 1;
+          addLog('Duplicate transcript from Whisper');
+          setConversationState('listening');
+          scheduleListenRetry('Duplicate transcript');
+          return;
+        }
+
         micRetryCountRef.current = 0;
         setMicErrorCount(0);
         setError(null);
+        emptyTranscriptStreakRef.current = 0;
         handleVoiceInput(transcript);
 
       } catch (err: any) {
         log('Whisper transcription error', err?.message);
         addLog(`Transcription error: ${err?.message}`);
-        setIsDavidThinking(false);
+        isProcessingVoiceRef.current = false;
         setConversationState('listening');
         setError('Could not transcribe audio. Try again.');
-        if (isConnectedRef.current) setTimeout(() => startListening(), 1000);
+        scheduleListenRetry('Transcription error');
       }
     };
 
@@ -752,7 +958,15 @@ export default function VoiceScreen({ route, navigation }: any) {
     log('Session ended by user');
     isConnectedRef.current = false;
     isDavidSpeakingRef.current = false;
+    isProcessingVoiceRef.current = false;
+    lastTranscriptRef.current = '';
+    recentTranscriptsRef.current = [];
+    lastResponseAtRef.current = 0;
+    hasGreetedRef.current = false;
+    emptyTranscriptStreakRef.current = 0;
     setConversationState('ended');
+
+    clearListenRetry();
 
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (e) { }
