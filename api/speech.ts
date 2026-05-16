@@ -68,7 +68,7 @@ export default async function handler(req: any, res: any) {
         },
         body: JSON.stringify({
           text: ttsPayload.ssmlText,
-          model_id: 'eleven_flash_v2_5',
+          model_id: 'eleven_turbo_v2_5',
           enable_ssml_parsing: ttsPayload.enableSsmlParsing,
           voice_settings: {
             stability: 0.45,
@@ -85,7 +85,8 @@ export default async function handler(req: any, res: any) {
     // If the primary voice fails with a 4xx (voice not found, plan restriction,
     // or unauthorized), retry with ElevenLabs built-in Adam voice which is
     // available on all plans including free tier.
-    if (!response.ok && [401, 403, 404, 422].includes(response.status)) {
+    // Trigger fallback on any non-2xx: 4xx (plan/voice restriction) OR 5xx (model not available on plan)
+    if (!response.ok) {
       const errPreview = await response.text();
       console.warn(`[Speech API] Primary voice ${voiceId} failed (${response.status}): ${errPreview.substring(0, 200)}`);
       const FALLBACK_VOICE_ID = 'pNInz6obpgDQGcFmaJgB'; // Adam — available on all ElevenLabs plans
@@ -100,9 +101,10 @@ export default async function handler(req: any, res: any) {
             'xi-api-key': apiKey,
           },
           body: JSON.stringify({
-            text: ttsPayload.ssmlText,
-            model_id: 'eleven_monolingual_v1', // most compatible model
-            enable_ssml_parsing: false, // disable SSML for fallback safety
+            // Strip SSML tags for fallback — eleven_monolingual_v1 does not support SSML
+            text: ttsPayload.ssmlText.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(),
+            model_id: 'eleven_monolingual_v1', // most compatible — works on all plans
+            enable_ssml_parsing: false, // SSML not supported on this model
             voice_settings: {
               stability: 0.45,
               similarity_boost: 0.75,

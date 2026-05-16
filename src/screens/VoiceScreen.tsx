@@ -356,8 +356,13 @@ export default function VoiceScreen({ route, navigation }: any) {
     }
 
     const firstName = getFirstNameFromSession();
+    // Greetings use force:true — no filler prefixes (mm…, heh.) or ellipsis pauses.
+    // Humanization is intentionally disabled here because greetings are already
+    // written to sound natural, and prefixes like "heh. hey. how's your day been?"
+    // sound awkward as an opening line.
     const greeting = humanizeForTts(getVoiceSessionGreeting(firstName || undefined), {
-      isGreeting: true,
+      isGreeting: false,
+      force: true,
     });
     hasGreetedRef.current = true;
 
