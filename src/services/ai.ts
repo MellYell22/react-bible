@@ -79,7 +79,11 @@ export interface ChatHistoryMessage {
   content: string;
 }
 
-export const getChatResponse = async (history: ChatHistoryMessage[], responseLength: ResponseLength = 'short'): Promise<string> => {
+export const getChatResponse = async (
+  history: ChatHistoryMessage[],
+  responseLength: ResponseLength = 'short',
+  moodKey?: string,
+): Promise<string> => {
   const lengthInstruction = {
     short: "Reply in 1-2 short lines. Sound like a real person talking — use ellipsis pauses sometimes (hey… / yeah…). Imperfect, not polished. No therapy phrases.",
     medium: "Reply in 2-3 short sentences with varied rhythm. Natural pauses via ellipsis okay. Stay grounded. No validation loops.",
@@ -101,7 +105,7 @@ export const getChatResponse = async (history: ChatHistoryMessage[], responseLen
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages })
+    body: JSON.stringify({ messages, moodKey })
   });
 
   if (!response.ok) {
@@ -117,7 +121,8 @@ export const getChatResponse = async (history: ChatHistoryMessage[], responseLen
 export const getChatResponseStream = async (
   history: ChatHistoryMessage[],
   onChunk: (text: string) => void,
-  responseLength: ResponseLength = 'short'
+  responseLength: ResponseLength = 'short',
+  moodKey?: string,
 ): Promise<string> => {
   const lengthInstruction = {
     short: "Reply in 1-2 short lines. Sound like a real person talking — use ellipsis pauses sometimes (hey… / yeah…). Imperfect, not polished. No therapy phrases.",
@@ -138,7 +143,7 @@ export const getChatResponseStream = async (
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, stream: true })
+    body: JSON.stringify({ messages, stream: true, moodKey })
   });
 
   if (!response.ok) {

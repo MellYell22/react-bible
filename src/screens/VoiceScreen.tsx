@@ -467,7 +467,11 @@ export default function VoiceScreen({ route, navigation }: any) {
     try {
       log('AI request sent', `history length: ${history.length}`);
 
-      const response = await getChatResponse(history, profile?.preferred_response_length || 'short');
+      const response = await getChatResponse(
+        history,
+        profile?.preferred_response_length || 'short',
+        route?.params?.mood,
+      );
 
       if (!response || !response.trim()) {
         addLog('Empty AI response');

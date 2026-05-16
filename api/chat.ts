@@ -1,12 +1,13 @@
 import OpenAI from 'openai';
-import { DAVID_PERSONALITY_PROMPT, DAVID_CHAT_TEMPERATURE } from '../src/constants/davidPersona';
+import { DAVID_CHAT_TEMPERATURE } from '../src/constants/davidPersona';
+import { buildDavidSystemPromptWithMood, resolveMoodKey } from '../src/utils/davidMoodContext';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { messages, stream = false } = req.body;
+  const { messages, stream = false, mood, moodKey, detectedMood, profile } = req.body;
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'Missing or invalid messages array' });
@@ -21,8 +22,18 @@ export default async function handler(req: any, res: any) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
+    const resolvedMoodKey = resolveMoodKey({
+      mood,
+      moodKey,
+      detectedMood,
+      profileMood: profile?.mood || profile?.currentMood || profile?.current_mood,
+      messages,
+    });
+    const systemPrompt = buildDavidSystemPromptWithMood(resolvedMoodKey);
+    console.log(`[Chat API] Mood context: ${resolvedMoodKey || 'none'}`);
+
     // System message is ALWAYS the first element — before any user messages
-    const systemMessage = { role: 'system' as const, content: DAVID_PERSONALITY_PROMPT };
+    const systemMessage = { role: 'system' as const, content: systemPrompt };
 
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');

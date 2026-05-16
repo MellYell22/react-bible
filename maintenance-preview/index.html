@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maintenance</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f7f8fb;
+      color: #111827;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at top, rgba(255, 255, 255, 0.9), transparent 42%),
+        #f7f8fb;
+    }
+
+    main {
+      width: min(100%, 640px);
+      padding: clamp(32px, 8vw, 64px);
+      text-align: center;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+    }
+
+    h1 {
+      margin: 0;
+      color: #111827;
+      font-size: clamp(2rem, 7vw, 3.25rem);
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+    }
+
+    p {
+      margin: 18px 0 0;
+      color: #374151;
+      font-size: clamp(1rem, 3vw, 1.2rem);
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main aria-label="Maintenance notice">
+    <h1>We'll be back soon.</h1>
+    <p>The site is under maintenance.</p>
+  </main>
+</body>
+</html>

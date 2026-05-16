@@ -9,6 +9,7 @@ import OpenAI from "openai";
 import { DAVID_PERSONALITY_PROMPT, DAVID_CHAT_TEMPERATURE } from './src/constants/davidPersona';
 import { isAlreadyElevenLabsSsml, prepareDavidTtsPayload } from './src/utils/davidSpeechDelivery';
 import { resolveDavidVoiceId } from './src/constants/elevenLabsVoice';
+import { buildDavidSystemPromptWithMood, resolveMoodKey } from './src/utils/davidMoodContext';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -286,7 +287,7 @@ app.get("/api/health", (req, res) => {
 
 // OpenAI API Endpoints
 app.post("/api/chat", async (req, res) => {
-  const { messages, stream = false } = req.body;
+  const { messages, stream = false, mood, moodKey, detectedMood, profile } = req.body;
   
   if (!process.env.OPENAI_API_KEY) {
     return res.status(500).json({ error: "OpenAI API Key is not configured." });
@@ -295,6 +296,16 @@ app.post("/api/chat", async (req, res) => {
   console.log("OPENAI REQUEST SENT - Chat");
 
   try {
+    const resolvedMoodKey = resolveMoodKey({
+      mood,
+      moodKey,
+      detectedMood,
+      profileMood: profile?.mood || profile?.currentMood || profile?.current_mood,
+      messages,
+    });
+    const systemPrompt = buildDavidSystemPromptWithMood(resolvedMoodKey);
+    console.log(`[Chat] Mood context: ${resolvedMoodKey || 'none'}`);
+
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -302,9 +313,9 @@ app.post("/api/chat", async (req, res) => {
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [{ role: "system", content: DAVID_PERSONALITY_PROMPT }, ...messages],
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
         stream: true,
-        temperature: 0.92,
+        temperature: DAVID_CHAT_TEMPERATURE,
         max_tokens: 120,
       });
 
@@ -320,7 +331,7 @@ app.post("/api/chat", async (req, res) => {
     } else {
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [{ role: "system", content: DAVID_PERSONALITY_PROMPT }, ...messages],
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
         temperature: DAVID_CHAT_TEMPERATURE,
         max_tokens: 120,
       });
