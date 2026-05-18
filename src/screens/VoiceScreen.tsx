@@ -119,7 +119,7 @@ export default function VoiceScreen({ route, navigation }: any) {
   const MIN_SPEECH_MS = 450;
   const MIN_SUSTAINED_SPEECH_FRAMES = 3;
   const MIN_RECORDING_MS = 800;
-  const MIN_AUDIO_BYTES = 2500;
+  const MIN_AUDIO_BYTES = 5000;
   const POST_TTS_MIC_DELAY_MS = 250;
   const MIC_RESTART_BASE_MS = 250;
   const MIC_RESTART_MAX_MS = 1600;
@@ -157,6 +157,7 @@ export default function VoiceScreen({ route, navigation }: any) {
   const scheduleListenRetry = (reason: string) => {
     if (!isConnectedRef.current) return;
     if (isDavidSpeakingRef.current || isProcessingVoiceRef.current) return;
+    const generation = sessionGenerationRef.current;
 
     clearListenRetry();
     const streak = emptyTranscriptStreakRef.current;
@@ -168,9 +169,9 @@ export default function VoiceScreen({ route, navigation }: any) {
     addLog(`${reason} — retry mic in ${delay}ms`);
     listenRetryTimeoutRef.current = setTimeout(() => {
       listenRetryTimeoutRef.current = null;
-      if (isConnectedRef.current && !isDavidSpeakingRef.current && !isProcessingVoiceRef.current) {
+      if (isSessionGenerationActive(generation) && !isDavidSpeakingRef.current && !isProcessingVoiceRef.current) {
         startListening();
-      } else {
+      } else if (sessionGenerationRef.current === generation) {
         setListeningInactive(`${reason} — retry blocked`);
       }
     }, delay);
@@ -270,7 +271,10 @@ export default function VoiceScreen({ route, navigation }: any) {
       });
       const audioUrl = await Promise.race([ttsPromise, timeoutPromise]);
 
-      if (!isSessionGenerationActive(generation)) return;
+      if (!isSessionGenerationActive(generation)) {
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        return;
+      }
 
       if (!audioUrl) {
         log('TTS timeout or failed — continuing without blocking');
@@ -287,7 +291,11 @@ export default function VoiceScreen({ route, navigation }: any) {
       audio.preload = 'auto';
 
       const finishGreeting = () => {
-        if (!isSessionGenerationActive(generation)) return;
+        if (!isSessionGenerationActive(generation)) {
+          URL.revokeObjectURL(audioUrl);
+          if (currentAudioRef.current === audio) currentAudioRef.current = null;
+          return;
+        }
         log('TTS playback ended', 'greeting');
         isDavidSpeakingRef.current = false;
         setIsDavidSpeaking(false);
@@ -343,6 +351,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     isProcessingVoiceRef.current = false;
     lastTranscriptRef.current = '';
     recentTranscriptsRef.current = [];
+    lastDavidResponseRef.current = '';
     hasGreetedRef.current = false;
     emptyTranscriptStreakRef.current = 0;
     clearListenRetry();
@@ -395,11 +404,8 @@ export default function VoiceScreen({ route, navigation }: any) {
 
     const words = cleaned.split(/\s+/).filter(w => w.length > 0);
 
-    // Fewer than 4 words — check if any are non-filler
-    if (words.length < 4) {
-      const meaningfulWords = words.filter(w => !FILLER_WORDS.has(w));
-      if (meaningfulWords.length === 0) return false;
-    }
+    const meaningfulWords = words.filter(w => !FILLER_WORDS.has(w));
+    if (meaningfulWords.length === 0) return false;
 
     return true;
   };
@@ -420,7 +426,9 @@ export default function VoiceScreen({ route, navigation }: any) {
   const ANTI_REPEAT_FALLBACKS = DAVID_ANTI_REPEAT_FALLBACKS;
 
   // ── Handle voice input (transcript → AI → TTS) ────────────────────────────
-  const handleVoiceInput = async (text: string) => {
+  const handleVoiceInput = async (text: string, generation = sessionGenerationRef.current) => {
+    if (!isSessionGenerationActive(generation)) return;
+
     const trimmedText = text.trim();
 
     if (
@@ -471,6 +479,8 @@ export default function VoiceScreen({ route, navigation }: any) {
         route?.params?.mood,
       );
 
+      if (!isSessionGenerationActive(generation)) return;
+
       if (!response || !response.trim()) {
         addLog('Empty AI response');
         setIsDavidThinking(false);
@@ -509,9 +519,10 @@ export default function VoiceScreen({ route, navigation }: any) {
       setLastResponseText(finalResponse);
       setMessages(prev => [...prev, { role: 'assistant', content: finalResponse }]);
 
-      await speakMessage(finalResponse);
+      await speakMessage(finalResponse, generation);
 
     } catch (err: any) {
+      if (!isSessionGenerationActive(generation)) return;
       addLog(`AI chat error: ${err?.message}`);
       setIsDavidThinking(false);
       isProcessingVoiceRef.current = false;
@@ -521,7 +532,9 @@ export default function VoiceScreen({ route, navigation }: any) {
   };
 
   // ── Text-to-speech ────────────────────────────────────────────────────────
-  const speakMessage = async (text: string) => {
+  const speakMessage = async (text: string, generation = sessionGenerationRef.current) => {
+    if (!isSessionGenerationActive(generation)) return;
+
     // Stop any audio that might still be playing
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
@@ -538,7 +551,14 @@ export default function VoiceScreen({ route, navigation }: any) {
 
     try {
       await preSpeechThinkingDelay();
+      if (!isSessionGenerationActive(generation)) return;
+
       const audioUrl = await generateSpeech(text, { skipHumanize: true });
+
+      if (!isSessionGenerationActive(generation)) {
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        return;
+      }
 
       if (!audioUrl) {
         log('TTS returned null — no audio URL');
@@ -569,6 +589,11 @@ export default function VoiceScreen({ route, navigation }: any) {
       };
 
       audio.onended = () => {
+        if (!isSessionGenerationActive(generation)) {
+          URL.revokeObjectURL(audioUrl);
+          if (currentAudioRef.current === audio) currentAudioRef.current = null;
+          return;
+        }
         log('TTS playback ended', 'response');
         isDavidSpeakingRef.current = false;
         isProcessingVoiceRef.current = false;
@@ -578,7 +603,7 @@ export default function VoiceScreen({ route, navigation }: any) {
         if (isConnectedRef.current) {
           setListeningActive(`response playback ended — mic resumes in ${POST_TTS_MIC_DELAY_MS}ms`);
           setTimeout(() => {
-            if (isConnectedRef.current && !isDavidSpeakingRef.current && !isProcessingVoiceRef.current) {
+            if (isSessionGenerationActive(generation) && !isDavidSpeakingRef.current && !isProcessingVoiceRef.current) {
               startListening();
             }
           }, POST_TTS_MIC_DELAY_MS);
@@ -586,6 +611,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       };
 
       audio.onerror = (e) => {
+        if (!isSessionGenerationActive(generation)) return;
         const errMsg = (e as any)?.message || 'unknown';
         log('Audio playback error', errMsg);
         addLog(`Audio playback failed: ${errMsg}`);
@@ -602,6 +628,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch((playErr: any) => {
+          if (!isSessionGenerationActive(generation)) return;
           log('audio.play() rejected (autoplay policy?)', playErr?.message);
           addLog(`audio.play() blocked: ${playErr?.message}. Try tapping the screen first.`);
           isDavidSpeakingRef.current = false;
@@ -614,6 +641,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       }
 
     } catch (err: any) {
+      if (!isSessionGenerationActive(generation)) return;
       log('speakMessage exception', err?.message);
       addLog(`TTS exception: ${err?.message}`);
       isDavidSpeakingRef.current = false;
@@ -654,6 +682,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       log('startListening blocked — session not connected');
       return;
     }
+    const generation = sessionGenerationRef.current;
 
     clearListenRetry();
     setListeningActive('microphone activation requested');
@@ -682,6 +711,11 @@ export default function VoiceScreen({ route, navigation }: any) {
       setListeningInactive('microphone permission denied');
       return;
     }
+    if (!isSessionGenerationActive(generation)) {
+      stream.getTracks().forEach(t => t.stop());
+      log('Microphone stream ignored — session changed');
+      return;
+    }
 
     // Pick the best supported MIME type
     const mimeType = [
@@ -703,6 +737,11 @@ export default function VoiceScreen({ route, navigation }: any) {
       setListeningInactive('MediaRecorder init failed');
       return;
     }
+    if (!isSessionGenerationActive(generation)) {
+      stream.getTracks().forEach(t => t.stop());
+      log('MediaRecorder skipped — session changed');
+      return;
+    }
 
     const chunks: Blob[] = [];
     let recordingStartedAt = 0;
@@ -714,6 +753,11 @@ export default function VoiceScreen({ route, navigation }: any) {
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
     recorder.onstart = () => {
+      if (!isSessionGenerationActive(generation)) {
+        if (recorder.state === 'recording') recorder.stop();
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
       recordingStartedAt = Date.now();
       log('Microphone activated — waiting for real speech before end-of-utterance');
       setListeningActive('MediaRecorder started');
@@ -743,6 +787,10 @@ export default function VoiceScreen({ route, navigation }: any) {
         let consecutiveSilenceFrames = 0;
 
         processor.onaudioprocess = (e) => {
+          if (!isSessionGenerationActive(generation)) {
+            if (recorder.state === 'recording') recorder.stop();
+            return;
+          }
           if (recorder.state !== 'recording') return;
 
           const input = e.inputBuffer.getChannelData(0);
@@ -808,7 +856,7 @@ export default function VoiceScreen({ route, navigation }: any) {
 
         // If user never speaks, do not send ambient audio to Whisper
         silenceTimeoutRef.current = setTimeout(() => {
-          if (recorder.state !== 'recording' || hasDetectedSpeech) return;
+          if (!isSessionGenerationActive(generation) || recorder.state !== 'recording' || hasDetectedSpeech) return;
           log('No speech detected — discarding recording');
           processor.disconnect();
           muteGain.disconnect();
@@ -823,7 +871,6 @@ export default function VoiceScreen({ route, navigation }: any) {
     recorder.onstop = async () => {
       const recordingDurationMs = Date.now() - recordingStartedAt;
       log('Recording stopped', { recordingDurationMs });
-      setListeningInactive('recording stopped');
 
       stream.getTracks().forEach(t => t.stop());
 
@@ -836,7 +883,8 @@ export default function VoiceScreen({ route, navigation }: any) {
         silenceTimeoutRef.current = null;
       }
 
-      if (!isConnectedRef.current) return;
+      if (!isSessionGenerationActive(generation)) return;
+      setListeningInactive('recording stopped');
 
       if (recordingDurationMs < MIN_RECORDING_MS) {
         emptyTranscriptStreakRef.current += 1;
@@ -883,12 +931,16 @@ export default function VoiceScreen({ route, navigation }: any) {
           body: formData,
         });
 
+        if (!isSessionGenerationActive(generation)) return;
+
         if (!response.ok) {
           const err = await response.json().catch(() => ({}));
           throw new Error(err.message || `Transcription failed: ${response.status}`);
         }
 
         const data = await response.json();
+        if (!isSessionGenerationActive(generation)) return;
+
         const transcript = data.transcript?.trim() || '';
         log('Transcript received', `"${transcript}"`);
 
@@ -920,9 +972,10 @@ export default function VoiceScreen({ route, navigation }: any) {
         setMicErrorCount(0);
         setError(null);
         emptyTranscriptStreakRef.current = 0;
-        handleVoiceInput(transcript);
+        handleVoiceInput(transcript, generation);
 
       } catch (err: any) {
+        if (!isSessionGenerationActive(generation)) return;
         log('Whisper transcription error', err?.message);
         addLog(`Transcription error: ${err?.message}`);
         isProcessingVoiceRef.current = false;
@@ -932,6 +985,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     };
 
     recorder.onerror = (e: any) => {
+      if (!isSessionGenerationActive(generation)) return;
       log('MediaRecorder error', e?.error?.message || 'unknown');
       setListeningInactive('MediaRecorder error');
       stream.getTracks().forEach(t => t.stop());
@@ -947,7 +1001,7 @@ export default function VoiceScreen({ route, navigation }: any) {
 
     // Auto-stop after 30s
     setTimeout(() => {
-      if (recorder.state === 'recording') {
+      if (isSessionGenerationActive(generation) && recorder.state === 'recording') {
         log('Auto-stopping recording after 30s');
         recorder.stop();
       }
@@ -958,9 +1012,10 @@ export default function VoiceScreen({ route, navigation }: any) {
   const handleTextSubmit = () => {
     const trimmed = textInput.trim();
     if (!trimmed || !isConnectedRef.current) return;
+    const generation = sessionGenerationRef.current;
     log('Text input submitted', trimmed);
     setTextInput('');
-    handleVoiceInput(trimmed);
+    handleVoiceInput(trimmed, generation);
   };
 
   const cleanupSessionResources = (reason: string) => {
@@ -973,6 +1028,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     isProcessingVoiceRef.current = false;
     lastTranscriptRef.current = '';
     recentTranscriptsRef.current = [];
+    lastDavidResponseRef.current = '';
     hasGreetedRef.current = false;
     emptyTranscriptStreakRef.current = 0;
     setConversationState('ended');

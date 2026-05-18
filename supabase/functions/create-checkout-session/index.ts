@@ -34,6 +34,15 @@ serve(async (req) => {
       );
     }
 
+    const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
+    if (proPriceId && priceId !== proPriceId) {
+      console.error(`[create-checkout-session] Error: Invalid priceId ${priceId}`);
+      return new Response(
+        JSON.stringify({ error: "Invalid subscription price." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Get user strictly from JWT to verify and get identity
     let userId: string | undefined = undefined;
     let userEmail: string | undefined = undefined;
