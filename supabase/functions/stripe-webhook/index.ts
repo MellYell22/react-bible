@@ -7,7 +7,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type, stripe-signature",
 };
 
-function assertProfileUpdated<T>(data: T[] | null, context: string): asserts data is T[] {
+type UpdatedProfileRow = { subscription_tier?: string };
+
+function assertProfileUpdated(data: UpdatedProfileRow[] | null, context: string): asserts data is UpdatedProfileRow[] {
   if (!data || data.length === 0) {
     throw new Error(`${context} affected 0 profile rows`);
   }
