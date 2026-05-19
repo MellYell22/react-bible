@@ -156,18 +156,24 @@ function AppContent() {
     setRouteParams(params);
   };
 
+  const reset = ({ routes }: { routes?: Array<{ name: string; params?: any }> }) => {
+    const nextRoute = routes?.[0];
+    if (!nextRoute) return;
+    navigate(nextRoute.name, nextRoute.params);
+  };
+
   const setParams = (params: any) => {
     setRouteParams((prev: any) => ({ ...prev, ...params }));
   };
 
   const renderScreen = () => {
-    const nav = { navigate, setParams };
+    const nav = { navigate, reset, setParams };
     switch (currentRoute) {
       case 'Home':         return <HomeScreen navigation={nav} />;
       case 'Mood':         return <MoodScreen navigation={nav} route={{ params: routeParams }} />;
       case 'Reflection':   return <ReflectionScreen navigation={nav} />;
       case 'Chat':         return <ChatScreen navigation={nav} route={{ params: routeParams }} />;
-      case 'Voice':        return <VoiceScreen navigation={nav} />;
+      case 'Voice':        return <VoiceScreen navigation={nav} route={{ params: routeParams }} />;
       case 'Profile':      return <ProfileScreen navigation={nav} route={{ params: routeParams }} />;
       case 'PaymentSuccess': return <PaymentSuccessScreen navigation={nav} />;
       default:             return <HomeScreen navigation={nav} />;

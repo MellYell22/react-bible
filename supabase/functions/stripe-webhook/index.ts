@@ -257,15 +257,17 @@ serve(async (req) => {
 
         console.log(`[Stripe Webhook] Subscription deleted for customer ${customerId}`);
 
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from("profiles")
           .update({
             subscription_tier: "free",
             updated_at: new Date().toISOString(),
           })
-          .eq("stripe_customer_id", customerId);
+          .eq("stripe_customer_id", customerId)
+          .select();
 
         if (error) throw error;
+        assertProfileUpdated(data, `Subscription deletion profile update for customer ${customerId}`);
         break;
       }
     }

@@ -819,12 +819,6 @@ export default function VoiceScreen({ route, navigation }: any) {
   // Flow: getUserMedia → MediaRecorder records audio → automatic silence detection stops recording
   //       → audio blob sent to /api/transcribe (Whisper) → transcript → David responds.
   const startListening = async () => {
-    const hasPermission = await requestMicPermission();
-    if (!hasPermission) {
-      setShowTextFallback(true);
-      return;
-    }
-
     if (isDavidSpeakingRef.current) {
       setListeningInactive('David is still speaking');
       log('startListening blocked — David is still speaking');
@@ -1762,48 +1756,3 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
-
-// Add user guidance for enabling mic permissions
-const showMicPermissionGuidance = () => {
-  setError(
-    'Microphone access is required for voice interaction. Please enable mic permissions in your browser settings.\n\nSteps:\n1. Click the lock icon in the address bar.\n2. Find "Microphone" in the permissions list.\n3. Set it to "Allow".\n4. Refresh the page.'
-  );
-  addLog('Displayed mic permission guidance to the user.');
-};
-
-// Update mic permission handling to include guidance
-const requestMicPermission = async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(track => track.stop()); // Stop the stream immediately after permission is granted
-    addLog('Microphone permission granted');
-    return true;
-  } catch (error) {
-    addLog('Microphone permission denied');
-    showMicPermissionGuidance();
-    return false;
-  }
-};
-
-// Integrate updated persona and greetings
-import { getVoiceSessionGreeting, DAVID_ANTI_REPEAT_FALLBACKS } from '../constants/persona';
-
-const handleGreeting = (firstName?: string) => {
-  const greeting = getVoiceSessionGreeting(firstName);
-  addLog(`Generated greeting: ${greeting}`);
-  return greeting;
-};
-
-const handleFallbackResponse = () => {
-  const fallback = DAVID_ANTI_REPEAT_FALLBACKS[
-    Math.floor(Math.random() * DAVID_ANTI_REPEAT_FALLBACKS.length)
-  ];
-  addLog(`Fallback response: ${fallback}`);
-  return fallback;
-};
-
-// Use the greeting and fallback logic in the conversation flow
-const startVoiceSession = (firstName?: string) => {
-  const greeting = handleGreeting(firstName);
-  playOpeningGreeting(greeting, sessionGenerationRef.current);
-};

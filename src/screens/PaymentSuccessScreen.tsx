@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { CheckCircle, ArrowRight, ShieldCheck } from 'lucide-react';
+import { AlertCircle, CheckCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useUser } from '../UserContext';
 import { FullScreenBackground } from '../components/FullScreenBackground';
+import { hasProAccess } from '../utils/tier';
 
 export default function PaymentSuccessScreen({ navigation }: { navigation: any }) {
   const { profile, refreshProfile } = useUser();
   const [isActivating, setIsActivating] = useState(true);
+  const [activationTimedOut, setActivationTimedOut] = useState(false);
   const [attempts, setAttempts] = useState(0);
+  const hasUnlockedPro = hasProAccess(profile);
 
   useEffect(() => {
     // Start polling for the pro status
@@ -20,6 +23,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
           console.warn('[PaymentSuccess] Polling timed out after 90 seconds.');
           clearInterval(interval);
           setIsActivating(false);
+          setActivationTimedOut(true);
           return next;
         }
         console.log(`[PaymentSuccess] Polling attempt ${next}...`);
@@ -37,9 +41,10 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
 
   useEffect(() => {
     console.log(`[PaymentSuccess] UI Check - Profile: ${profile?.id}, Tier: ${profile?.subscription_tier}, Status: ${profile?.stripe_subscription_status}`);
-    if (profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'owner' || (profile as any)?.subscription_status === 'active') {
+    if (hasUnlockedPro) {
       console.log('[PaymentSuccess] PRO STATUS DETECTED! Unlocking app features.');
       setIsActivating(false);
+      setActivationTimedOut(false);
       
       // Auto-redirect after a small delay to let user see success
       const timeout = setTimeout(() => {
@@ -47,7 +52,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
       }, 3000);
       return () => clearTimeout(timeout);
     }
-  }, [profile?.subscription_tier]);
+  }, [hasUnlockedPro, profile?.id, profile?.stripe_subscription_status]);
 
   const handleContinue = () => {
     // Redirect to main app entry (Mood)
@@ -56,6 +61,22 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
       routes: [{ name: 'Mood' }],
     });
   };
+
+  const handleProfile = () => {
+    navigation.navigate('Profile');
+  };
+
+  const title = isActivating
+    ? 'HEAVENLY SYNC IN PROGRESS'
+    : hasUnlockedPro
+      ? 'GLORY! YOU ARE PRO'
+      : 'WE ARE STILL CONFIRMING YOUR PRO ACCESS';
+
+  const description = isActivating
+    ? 'Our systems are receiving the confirmation from Stripe. Your account will be transformed into Pro momentarily...'
+    : hasUnlockedPro
+      ? 'Your transformation is complete. You now have unlimited access to AI insights and deeper scripture reflections.'
+      : 'Your payment may still be processing. Please open Profile to refresh your account status or contact support if Pro is not unlocked shortly.';
 
   return (
     <FullScreenBackground>
@@ -79,7 +100,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
                   <ActivityIndicator size="large" color="#d4af37" />
                   <Text style={styles.pollingText}>Finalizing your upgrade...</Text>
                 </motion.div>
-              ) : (
+              ) : hasUnlockedPro ? (
                 <motion.div
                   key="success"
                   initial={{ scale: 0 }}
@@ -88,35 +109,42 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
                 >
                   <CheckCircle color="#10B981" size={64} />
                 </motion.div>
+              ) : (
+                <motion.div
+                  key="pending"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                >
+                  <AlertCircle color="#F59E0B" size={64} />
+                </motion.div>
               )}
             </AnimatePresence>
           </View>
 
           <Text style={styles.title}>
-            {isActivating ? 'HEAVENLY SYNC IN PROGRESS' : 'GLORY! YOU ARE PRO'}
+            {title}
           </Text>
 
           <Text style={styles.description}>
-            {isActivating 
-              ? 'Our systems are receiving the confirmation from Stripe. Your account will be transformed into Pro momentarily...'
-              : 'Your transformation is complete. You now have unlimited access to AI insights and deeper scripture reflections.'}
+            {description}
           </Text>
 
           {!isActivating && (
             <TouchableOpacity 
               style={styles.button} 
-              onPress={handleContinue}
+              onPress={hasUnlockedPro ? handleContinue : handleProfile}
               activeOpacity={0.8}
             >
-              <Text style={styles.buttonText}>START YOUR JOURNEY</Text>
+              <Text style={styles.buttonText}>{hasUnlockedPro ? 'START YOUR JOURNEY' : 'OPEN PROFILE'}</Text>
               <ArrowRight color="#0b1e3d" size={20} />
             </TouchableOpacity>
           )}
 
-          {isActivating && attempts > 10 && (
+          {isActivating && attempts > 10 && !activationTimedOut && (
             <TouchableOpacity 
               style={styles.troubleButton} 
-              onPress={handleContinue}
+              onPress={handleProfile}
             >
               <Text style={styles.troubleText}>Taking too long? Go to Profile</Text>
             </TouchableOpacity>
