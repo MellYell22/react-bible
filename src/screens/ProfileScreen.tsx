@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
+import { supabase } from '../services/supabase';
 import { Profile } from '../types';
 import { LogOut, CreditCard, Shield, CheckCircle2, AlertCircle, Lock, Star, Bookmark, Trash2, Check, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import { createCheckoutSession } from '../services/stripe';
