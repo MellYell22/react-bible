@@ -46,7 +46,7 @@ const shouldMaybeAddOpener = (text: string, options: HumanizeOptions): boolean =
       text,
     );
 
-  return emotionalCue ? Math.random() < 0.25 : Math.random() < 0.08;
+  return emotionalCue ? Math.random() < 0.22 : Math.random() < 0.06;
 };
 
 const joinLineBreaksConversationally = (text: string): string => {
@@ -101,6 +101,16 @@ const softenShortInternalStops = (text: string): string => {
   return restoreDecimalPoints(t);
 };
 
+const addTinyNaturalBreaths = (text: string): string => {
+  let t = text;
+
+  t = t.replace(/\bI'm David, I'm\b/g, "I'm David, and I'm");
+  t = t.replace(/\bI'm David\.\s+/g, "I'm David, ");
+  t = t.replace(/\b(I'm with you|I hear you|That's a lot|That sounds heavy),\s+/gi, '$1, ');
+
+  return t;
+};
+
 const lightlyShortenRunOn = (text: string): string => {
   const sentenceMatches = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g);
   if (!sentenceMatches || sentenceMatches.length <= 2) return text;
@@ -125,6 +135,7 @@ export function humanizeForTts(
   t = t.replace(/\s+([,.!?])/g, '$1');
   t = softenPunctuationForTts(t);
   t = softenShortInternalStops(t);
+  t = addTinyNaturalBreaths(t);
   t = lightlyShortenRunOn(t);
 
   if (shouldMaybeAddOpener(t, options)) {
@@ -148,8 +159,9 @@ export function sanitizeForDavidSpeech(text: string): string {
   t = t.replace(/\s+([,.!?])/g, '$1');
   t = softenPunctuationForTts(t);
   t = softenShortInternalStops(t);
+  t = addTinyNaturalBreaths(t);
 
-  if (t.length >= 12 && t.length <= 34 && !SOFT_FILLER_RE.test(t) && Math.random() < 0.08) {
+  if (t.length >= 12 && t.length <= 34 && !SOFT_FILLER_RE.test(t) && Math.random() < 0.05) {
     const ack = SHORT_ACKNOWLEDGEMENTS[Math.floor(Math.random() * SHORT_ACKNOWLEDGEMENTS.length)];
     t = `${ack} ${t.charAt(0).toLowerCase()}${t.slice(1)}`;
   }
@@ -184,10 +196,10 @@ export function preSpeechThinkingDelay(text = ''): Promise<void> {
       text,
     );
 
-  const base = emotionalCue ? 520 : 320;
-  const lengthAdjustment = wordCount <= 10 ? 180 : wordCount >= 35 ? -80 : 40;
-  const jitter = Math.floor(Math.random() * 180);
-  const delayMs = Math.max(260, Math.min(900, base + lengthAdjustment + jitter));
+  const base = emotionalCue ? 610 : 390;
+  const lengthAdjustment = wordCount <= 10 ? 230 : wordCount >= 35 ? -30 : 90;
+  const jitter = Math.floor(Math.random() * 220);
+  const delayMs = Math.max(340, Math.min(1050, base + lengthAdjustment + jitter));
 
   return new Promise(resolve => setTimeout(resolve, delayMs));
 }
