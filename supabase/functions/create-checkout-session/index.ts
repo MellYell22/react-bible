@@ -85,6 +85,23 @@ serve(async (req) => {
       );
     }
 
+    const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
+    if (!proPriceId) {
+      console.error("[create-checkout-session] CRITICAL: STRIPE_PRICE_ID_PRO is not set in Supabase secrets.");
+      return new Response(
+        JSON.stringify({ error: "Server configuration error: Pro price ID missing." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (priceId !== proPriceId) {
+      console.error(`[create-checkout-session] Rejected checkout for unknown price: ${priceId}`);
+      return new Response(
+        JSON.stringify({ error: "Invalid subscription price." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const isTestMode = stripeSecretKey.startsWith("sk_test_");
     console.log(`[create-checkout-session] Stripe Mode: ${isTestMode ? "TEST" : "LIVE"}`);
 

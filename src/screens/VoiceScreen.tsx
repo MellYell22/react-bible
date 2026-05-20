@@ -13,6 +13,7 @@ import {
   isJunkTranscript,
   isMeaningfulTranscript,
   isDuplicateTranscript,
+  transcriptsAreSimilar,
   looksLikeOpeningGreeting,
   looksLikeBannedTherapyPhrase,
   normalizeTranscript,
@@ -485,6 +486,34 @@ export default function VoiceScreen({ route, navigation }: any) {
     return similarity > 0.6;
   };
 
+  const getLastAssistantText = (): string => {
+    const lastAssistant = [...messagesRef.current]
+      .reverse()
+      .find(message => message.role === 'assistant');
+    return lastDavidResponseRef.current || lastAssistant?.content || lastResponseText || '';
+  };
+
+  const looksLikeAssistantEcho = (text: string): boolean => {
+    const normalizedTranscript = normalizeTranscript(text);
+    const normalizedAssistant = normalizeTranscript(getLastAssistantText());
+    if (!normalizedTranscript || !normalizedAssistant) return false;
+    if (transcriptsAreSimilar(normalizedTranscript, normalizedAssistant)) return true;
+    if (normalizedAssistant.includes(normalizedTranscript) && normalizedTranscript.length >= 12) return true;
+
+    const transcriptWords = normalizedTranscript
+      .split(/\s+/)
+      .filter(word => word.length > 3);
+    if (transcriptWords.length < 3) return false;
+
+    const assistantWords = new Set(
+      normalizedAssistant
+        .split(/\s+/)
+        .filter(word => word.length > 3)
+    );
+    const overlap = transcriptWords.filter(word => assistantWords.has(word)).length;
+    return overlap / transcriptWords.length >= 0.75;
+  };
+
   const ANTI_REPEAT_FALLBACKS = DAVID_ANTI_REPEAT_FALLBACKS;
 
   // ── Handle voice input (transcript → AI → TTS) ────────────────────────────
@@ -510,6 +539,14 @@ export default function VoiceScreen({ route, navigation }: any) {
       addLog('Rejected duplicate transcript');
       setConversationState('listening');
       scheduleListenRetry('Duplicate transcript');
+      return;
+    }
+
+    if (looksLikeAssistantEcho(trimmedText)) {
+      emptyTranscriptStreakRef.current += 1;
+      addLog('Rejected transcript that matched David’s own voice');
+      setConversationState('listening');
+      scheduleListenRetry('Assistant echo');
       return;
     }
 
@@ -632,6 +669,28 @@ export default function VoiceScreen({ route, navigation }: any) {
 
     const playbackToken = ++playbackTokenRef.current;
 
+    const clearStalePlaybackState = (reason: string, audioUrlToRevoke?: string) => {
+      log(reason);
+      if (audioUrlToRevoke) URL.revokeObjectURL(audioUrlToRevoke);
+
+      isDavidSpeakingRef.current = false;
+      setIsDavidSpeaking(false);
+
+      if (!isConnectedRef.current) {
+        isProcessingVoiceRef.current = false;
+        setIsDavidThinking(false);
+        setConversationState('ended');
+        return;
+      }
+
+      if (activeVoiceTurnRef.current === voiceTurnId) {
+        isProcessingVoiceRef.current = false;
+        setIsDavidThinking(false);
+      }
+
+      setConversationState(isProcessingVoiceRef.current ? 'processing' : 'listening');
+    };
+
     isDavidSpeakingRef.current = true;
     setIsDavidSpeaking(true);
     setListeningInactive('response playback started');
@@ -643,7 +702,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     try {
       await preSpeechThinkingDelay(speechText);
       if (!isVoiceTurnActive(voiceTurnId, generation) || playbackTokenRef.current !== playbackToken) {
-        log('TTS request skipped — voice turn no longer active');
+        clearStalePlaybackState('TTS request skipped — voice turn no longer active');
         return;
       }
       log('TTS request started after formatting complete', `${speechText.length} chars`);
@@ -666,8 +725,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       }
 
       if (!isVoiceTurnActive(voiceTurnId, generation) || playbackTokenRef.current !== playbackToken) {
-        log('Audio URL ignored — voice turn no longer active');
-        URL.revokeObjectURL(audioUrl);
+        clearStalePlaybackState('Audio URL ignored — voice turn no longer active', audioUrl);
         return;
       }
 
@@ -730,8 +788,7 @@ export default function VoiceScreen({ route, navigation }: any) {
       };
 
       if (!isVoiceTurnActive(voiceTurnId, generation) || playbackTokenRef.current !== playbackToken) {
-        log('audio.play() skipped — voice turn no longer active');
-        URL.revokeObjectURL(audioUrl);
+        clearStalePlaybackState('audio.play() skipped — voice turn no longer active', audioUrl);
         return;
       }
 
@@ -853,7 +910,14 @@ export default function VoiceScreen({ route, navigation }: any) {
     log('Requesting microphone permission');
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
       log('Microphone permission granted');
     } catch (err: any) {
       log('Microphone permission denied', err?.message);
@@ -1139,7 +1203,7 @@ export default function VoiceScreen({ route, navigation }: any) {
   // ── Text fallback submit ──────────────────────────────────────────
   const handleTextSubmit = () => {
     const trimmed = textInput.trim();
-    if (!trimmed || !isConnectedRef.current) return;
+    if (!trimmed || !isConnectedRef.current || isDavidThinking || isDavidSpeaking || isProcessingVoiceRef.current) return;
     log('Text input submitted', trimmed);
     setTextInput('');
     handleVoiceInput(trimmed);
@@ -1353,13 +1417,13 @@ export default function VoiceScreen({ route, navigation }: any) {
               placeholderTextColor="rgba(212, 175, 55, 0.4)"
               onSubmitEditing={handleTextSubmit}
               returnKeyType="send"
-              editable={!isDavidThinking && !isDavidSpeaking}
+              editable={!isDavidThinking && !isDavidSpeaking && !isProcessingVoiceRef.current}
               multiline={false}
             />
             <TouchableOpacity
-              style={[styles.textSendButton, (!textInput.trim() || isDavidThinking) && styles.textSendButtonDisabled]}
+              style={[styles.textSendButton, (!textInput.trim() || isDavidThinking || isDavidSpeaking || isProcessingVoiceRef.current) && styles.textSendButtonDisabled]}
               onPress={handleTextSubmit}
-              disabled={!textInput.trim() || isDavidThinking || isDavidSpeaking}
+              disabled={!textInput.trim() || isDavidThinking || isDavidSpeaking || isProcessingVoiceRef.current}
             >
               <Text style={styles.textSendButtonText}>Send</Text>
             </TouchableOpacity>
