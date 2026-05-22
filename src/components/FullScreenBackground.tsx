@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, SafeAreaView } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 
 interface FullScreenBackgroundProps {
   children: React.ReactNode;
@@ -9,9 +9,9 @@ interface FullScreenBackgroundProps {
 export const FullScreenBackground: React.FC<FullScreenBackgroundProps> = ({ children, center = false }) => {
   return (
     <View style={[styles.container, center && styles.center]}>
-      <SafeAreaView style={styles.safeArea}>
+      <View style={styles.safeArea}>
         {children}
-      </SafeAreaView>
+      </View>
     </View>
   );
 };

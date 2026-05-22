@@ -5,7 +5,6 @@ import {
   TouchableOpacity, 
   StyleSheet, 
   ScrollView, 
-  SafeAreaView, 
   Platform,
   Dimensions
 } from 'react-native';
@@ -51,7 +50,7 @@ const Layout: React.FC<LayoutProps> = ({
   const isPro = user?.subscription_tier === 'pro';
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
@@ -98,7 +97,7 @@ const Layout: React.FC<LayoutProps> = ({
           <Text style={styles.footerText}>{AUTHOR_CREDIT}</Text>
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
