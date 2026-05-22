@@ -6,6 +6,18 @@
     <title>Bible Mood Search</title>
     <script>
       window.global = window;
+      // Polyfill process for Node-oriented dependencies that reference it at runtime.
+      // Must run BEFORE the app module so typeof guards in libraries work correctly.
+      if (typeof window.process === 'undefined') {
+        window.process = { env: {} };
+      } else if (!window.process.env) {
+        window.process.env = {};
+      }
+      // Safety net: some bundled dependencies may reference a bare `env` variable
+      // after minification or incorrect tree-shaking on certain build hosts.
+      if (typeof window.env === 'undefined') {
+        window.env = {};
+      }
     </script>
   </head>
   <body>
@@ -13,4 +25,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
