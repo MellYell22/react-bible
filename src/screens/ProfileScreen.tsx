@@ -68,8 +68,6 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
     const urlParams = new URLSearchParams(window.location.search);
     const success = urlParams.get('success') === 'true' || route?.params?.success || route?.params?.paymentSuccess;
     const canceled = urlParams.get('canceled') === 'true' || route?.params?.canceled;
-    const showPricing = route?.params?.showPricing;
-
     if (success || canceled) {
       console.log(`[StripeDebug] Handling Stripe redirect. Success: ${!!success}, Canceled: ${!!canceled}`);
       
@@ -81,31 +79,6 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
         if (profile?.subscription_tier !== 'pro') {
           setIsActivating(true);
           setStatusMessage({ text: 'Payment received! Activating your Pro plan...', type: 'info' });
-          
-          // Fallback: If webhook fails, we optimistically update the tier from the frontend
-          // since Stripe already verified payment to reach this success URL.
-          const forceUpdateTier = async () => {
-            try {
-              if (profile?.id) {
-                console.log('[StripeDebug] Applying optimistic Pro tier update to DB...');
-                const { error } = await supabase
-                  .from('profiles')
-                  .update({ 
-                    subscription_tier: 'pro',
-                    subscription_status: 'active'
-                  })
-                  .eq('id', profile.id);
-                  
-                if (error) {
-                  console.error('[StripeDebug] Optimistic update failed:', error);
-                } else {
-                  console.log('[StripeDebug] Optimistic update successful.');
-                }
-              }
-            } catch (err) {
-              console.error('[StripeDebug] Optimistic update error:', err);
-            }
-          };
 
           // Start polling for subscription update
           let attempts = 0;
@@ -114,11 +87,6 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
           const checkStatus = async () => {
             attempts++;
             console.log(`[StripeDebug] Polling subscription status (Attempt ${attempts}/${maxAttempts})...`);
-            
-            // On attempt 3, if still free, force the update
-            if (attempts === 3) {
-               await forceUpdateTier();
-            }
 
             const latestProfile = await refreshProfile(false);
             
