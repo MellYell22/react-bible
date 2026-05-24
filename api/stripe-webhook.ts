@@ -25,6 +25,19 @@ async function getRawBody(readable: any) {
   return Buffer.concat(chunks);
 }
 
+async function getCheckoutSessionPriceId(sessionId: string): Promise<string | undefined> {
+  const lineItems = await stripe.checkout.sessions.listLineItems(sessionId, { limit: 1 });
+  return lineItems.data[0]?.price?.id;
+}
+
+function getConfiguredProPriceId(): string {
+  const proPriceId = process.env.STRIPE_PRICE_ID_PRO;
+  if (!proPriceId) {
+    throw new Error('STRIPE_PRICE_ID_PRO is not configured; refusing to grant paid access');
+  }
+  return proPriceId;
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -101,6 +114,13 @@ export default async function handler(req: any, res: any) {
         
         console.log(`[Stripe Webhook] Processing session ${session.id} for user metadata: ${userIdMetadata}`);
 
+        const priceId = await getCheckoutSessionPriceId(session.id);
+        const proPriceId = getConfiguredProPriceId();
+        if (priceId !== proPriceId) {
+          console.warn(`[Stripe Webhook] Ignoring checkout session ${session.id} for unexpected price ${priceId || 'none'}`);
+          break;
+        }
+
         const profile = await findProfile(customerId, customerEmail, userIdMetadata);
         
         if (profile) {
@@ -116,11 +136,12 @@ export default async function handler(req: any, res: any) {
 
           if (error) {
             console.error(`[Stripe Webhook] UPDATE FAILED for user ${profile.id}: ${error.message}`);
+            throw error;
           } else {
             console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
           }
         } else {
-          console.error(`[Stripe Webhook] CRITICAL: Could not resolve profile for checkout session ${session.id}`);
+          throw new Error(`Could not resolve profile for checkout session ${session.id}`);
         }
         break;
       }
@@ -133,6 +154,16 @@ export default async function handler(req: any, res: any) {
         const subscriptionId = invoice.subscription as string;
 
         console.log(`[Stripe Webhook] Processing invoice ${invoice.id} for customer ${customerId}`);
+
+        const subscription = subscriptionId
+          ? await stripe.subscriptions.retrieve(subscriptionId)
+          : null;
+        const priceId = subscription?.items.data[0]?.price?.id;
+        const proPriceId = getConfiguredProPriceId();
+        if (priceId !== proPriceId) {
+          console.warn(`[Stripe Webhook] Ignoring invoice ${invoice.id} for unexpected price ${priceId || 'none'}`);
+          break;
+        }
 
         const profile = await findProfile(customerId, customerEmail);
 
@@ -150,9 +181,12 @@ export default async function handler(req: any, res: any) {
           
           if (error) {
             console.error(`[Stripe Webhook] UPDATE FAILED for user ${profile.id} on invoice: ${error.message}`);
+            throw error;
           } else {
             console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
           }
+        } else {
+          throw new Error(`Could not resolve profile for paid invoice ${invoice.id}`);
         }
         break;
       }
@@ -163,9 +197,12 @@ export default async function handler(req: any, res: any) {
         const customerId = subscription.customer as string;
         const userIdMetadata = subscription.metadata?.userId || subscription.metadata?.user_id;
         const status = subscription.status;
+        const priceId = subscription.items.data[0]?.price?.id;
+        const proPriceId = getConfiguredProPriceId();
+        const isProPrice = priceId === proPriceId;
         
         // Map any "paying" status to pro
-        const isPro = status === 'active' || status === 'trialing';
+        const isPro = isProPrice && (status === 'active' || status === 'trialing');
         const tier = isPro ? 'pro' : 'free';
 
         console.log(`[Stripe Webhook] Syncing subscription ${subscription.id} status: ${status} for user: ${userIdMetadata}`);
@@ -186,9 +223,12 @@ export default async function handler(req: any, res: any) {
 
           if (error) {
             console.error(`[Stripe Webhook] SYNC FAILED for user ${profile.id}: ${error.message}`);
+            throw error;
           } else {
             console.log(`[Stripe Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
           }
+        } else if (isProPrice) {
+          throw new Error(`Could not resolve profile for subscription ${subscription.id}`);
         }
         break;
       }
@@ -213,6 +253,7 @@ export default async function handler(req: any, res: any) {
 
           if (error) {
             console.error(`[Stripe Webhook] CANCELLATION FAILED for user ${profile.id}: ${error.message}`);
+            throw error;
           } else {
             console.log(`[Stripe Webhook] CANCELLATION SUCCESS: User ${profile.id} downgraded to free.`);
           }
