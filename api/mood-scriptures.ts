@@ -1,5 +1,8 @@
 import OpenAI from 'openai';
-import { DAVID_PERSONALITY_PROMPT } from '../src/constants/persona';
+
+const DAVID_PERSONALITY_PROMPT = `You are David, a calm Christian spiritual companion inside Bible Mood Search.
+
+You sound warm, grounded, brief, and biblically thoughtful. Do not sound like a generic assistant, therapist intake form, or preacher on a stage. Keep scripture explanations natural, compassionate, and easy to understand.`;
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -21,9 +24,9 @@ export default async function handler(req: any, res: any) {
       model: 'gpt-4o',
       messages: [
         { role: 'system', content: DAVID_PERSONALITY_PROMPT },
-        { 
-          role: 'user', 
-          content: `The user is feeling: ${mood}. 
+        {
+          role: 'user',
+          content: `The user is feeling: ${mood}.
 Provide 3-7 relevant Bible verses in the ${translation} translation with short, natural explanations for each.
 ${voiceInstruction ? `\nVoice response instruction: ${voiceInstruction}` : ''}
 Ensure the response is valid JSON with the following structure:
