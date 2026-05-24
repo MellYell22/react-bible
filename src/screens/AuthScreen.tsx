@@ -12,10 +12,13 @@ import {
 import { Globe, Menu, Search, User, Settings } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { FullScreenBackground } from '../components/FullScreenBackground';
+import { useUser } from '../UserContext';
+import { BibleTranslation } from '../types';
 
 const TRANSLATIONS = ['NIV', 'KJV', 'NLT', 'ESV', 'NKJV', 'CSB'];
 
 export default function AuthScreen() {
+  const { continueAsGuest } = useUser();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -234,7 +237,10 @@ export default function AuthScreen() {
 
             {/* Continue as Guest Link */}
             {!isResettingPassword && !isSignUp && (
-              <TouchableOpacity style={styles.guestLinkContainer}>
+              <TouchableOpacity
+                style={styles.guestLinkContainer}
+                onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}
+              >
                 <Text style={styles.guestLink}>CONTINUE AS GUEST</Text>
               </TouchableOpacity>
             )}
