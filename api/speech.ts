@@ -200,6 +200,35 @@ function buildSpokenTranscript(text: string, tuning: VoiceTuning): string {
   return `${tags}${addNaturalBreaks(text, tuning)}`;
 }
 
+function toPrimaryEmotion(emotion: string): string {
+  if (['neutral', 'angry', 'excited', 'content', 'sad', 'scared'].includes(emotion)) {
+    return emotion;
+  }
+
+  if (['happy', 'enthusiastic', 'elated', 'euphoric', 'triumphant', 'amazed', 'surprised'].includes(emotion)) {
+    return 'excited';
+  }
+
+  if (['dejected', 'melancholic', 'disappointed', 'hurt', 'guilty', 'rejected', 'nostalgic', 'wistful'].includes(emotion)) {
+    return 'sad';
+  }
+
+  if (['anxious', 'panicked', 'alarmed'].includes(emotion)) {
+    return 'scared';
+  }
+
+  return 'content';
+}
+
+function buildPlainPacedTranscript(text: string, tuning: VoiceTuning): string {
+  return addNaturalBreaks(text, tuning)
+    .replace(/<break time="\d+ms"\/>/g, ' ... ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?])/g, '$1')
+    .trim();
+}
+
 function buildRequestHeaders(apiKey: string, authMode: CartesiaAuthMode): Record<string, string> {
   const authHeader =
     authMode === 'bearer'
@@ -214,12 +243,20 @@ function buildRequestHeaders(apiKey: string, authMode: CartesiaAuthMode): Record
   };
 }
 
-function buildCartesiaBody(voiceId: string, text: string, tuning: VoiceTuning): Record<string, unknown> {
+function buildCartesiaBody(
+  voiceId: string,
+  text: string,
+  tuning: VoiceTuning,
+  options: { ssml: boolean } = { ssml: true },
+): Record<string, unknown> {
   const { ssmlEmotion, ssmlSpeed, openerPauseMs, phrasePauseMs, sentencePauseMs, ...generationConfig } = tuning;
+  const config = options.ssml
+    ? generationConfig
+    : { ...generationConfig, emotion: toPrimaryEmotion(generationConfig.emotion) };
 
   return {
     model_id: CARTESIA_MODEL_ID,
-    transcript: buildSpokenTranscript(text, tuning),
+    transcript: options.ssml ? buildSpokenTranscript(text, tuning) : buildPlainPacedTranscript(text, tuning),
     voice: {
       id: voiceId,
     },
@@ -229,7 +266,7 @@ function buildCartesiaBody(voiceId: string, text: string, tuning: VoiceTuning): 
       bit_rate: 128000,
       sample_rate: 44100,
     },
-    generation_config: generationConfig,
+    generation_config: config,
   };
 }
 
@@ -239,11 +276,12 @@ async function callCartesia(
   text: string,
   config: VoiceTuning,
   authMode: CartesiaAuthMode,
+  options: { ssml: boolean } = { ssml: true },
 ): Promise<Response> {
   return fetch(CARTESIA_TTS_URL, {
     method: 'POST',
     headers: buildRequestHeaders(apiKey, authMode),
-    body: JSON.stringify(buildCartesiaBody(voiceId, text, config)),
+    body: JSON.stringify(buildCartesiaBody(voiceId, text, config, options)),
   });
 }
 
@@ -305,6 +343,16 @@ export default async function handler(req: any, res: any) {
   try {
     let response = await callCartesia(apiKey, voiceId, text, config, 'bearer');
 
+    if (response.status === 400) {
+      const ssmlError = await response.clone().text().catch(() => '');
+
+      console.warn(
+        `[Speech API] Cartesia rejected SSML-enhanced transcript. Retrying with plain paced transcript. ${ssmlError.substring(0, 250)}`
+      );
+
+      response = await callCartesia(apiKey, voiceId, text, config, 'bearer', { ssml: false });
+    }
+
     if (response.status === 401 || response.status === 403) {
       const firstError = await response.clone().text().catch(() => '');
 
@@ -313,6 +361,16 @@ export default async function handler(req: any, res: any) {
       );
 
       response = await callCartesia(apiKey, voiceId, text, config, 'x-api-key');
+
+      if (response.status === 400) {
+        const ssmlError = await response.clone().text().catch(() => '');
+
+        console.warn(
+          `[Speech API] Cartesia rejected SSML-enhanced transcript with X-API-Key. Retrying with plain paced transcript. ${ssmlError.substring(0, 250)}`
+        );
+
+        response = await callCartesia(apiKey, voiceId, text, config, 'x-api-key', { ssml: false });
+      }
     }
 
     if (!response.ok) {
