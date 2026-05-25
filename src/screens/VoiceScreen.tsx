@@ -16,8 +16,9 @@ import {
   looksLikeOpeningGreeting,
   looksLikeBannedTherapyPhrase,
   normalizeTranscript,
+  transcriptsAreSimilar,
 } from '../utils/voiceTranscript';
-import { getVoiceSessionGreeting, DAVID_ANTI_REPEAT_FALLBACKS } from '../constants/persona';
+import { getDavidGreeting, DAVID_ANTI_REPEAT_FALLBACKS } from '../constants/davidPersona';
 import { humanizeForTts, preSpeechThinkingDelay, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 
 const TTS_START_TIMEOUT_MS = 2500;
@@ -119,7 +120,7 @@ export default function VoiceScreen({ route, navigation }: any) {
   const MAX_MIC_RETRIES = 1; // Show text fallback after 1 network failure (network errors are persistent)
   // Silence / speech-end detection (MediaRecorder + AudioContext)
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isProcessingVoiceRef = useRef(false);
   const lastTranscriptRef = useRef<string>('');
   const emptyTranscriptStreakRef = useRef(0);
@@ -141,8 +142,8 @@ export default function VoiceScreen({ route, navigation }: any) {
   const MIN_SPEECH_MS = 360;
   const MIN_SUSTAINED_SPEECH_FRAMES = 3;
   const MIN_RECORDING_MS = 650;
-  const MIN_AUDIO_BYTES = 2200;
-  const POST_TTS_MIC_DELAY_MS = 520;
+  const MIN_AUDIO_BYTES = 5000;
+  const POST_TTS_MIC_DELAY_MS = 900;
   const MIC_RESTART_BASE_MS = 250;
   const MIC_RESTART_MAX_MS = 1600;
   const NO_SPEECH_DISCARD_MS = 15000;
@@ -432,7 +433,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     // Humanization is intentionally disabled here because greetings are already
     // written to sound natural, and prefixes like "heh. hey. how's your day been?"
     // sound awkward as an opening line.
-    const greeting = humanizeForTts(getVoiceSessionGreeting(firstName || undefined), {
+    const greeting = humanizeForTts(getDavidGreeting(firstName || undefined), {
       isGreeting: false,
       force: true,
     });
@@ -442,6 +443,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     addLog(`David: ${greeting}`);
     setMessages([{ role: 'assistant', content: greeting }]);
     setLastResponseText(greeting);
+    lastDavidResponseRef.current = greeting;
 
     void playOpeningGreeting(greeting, generation);
   };
@@ -487,6 +489,13 @@ export default function VoiceScreen({ route, navigation }: any) {
 
   const ANTI_REPEAT_FALLBACKS = DAVID_ANTI_REPEAT_FALLBACKS;
 
+  const isLikelyDavidEcho = (text: string): boolean => {
+    const normalizedUser = normalizeTranscript(text);
+    const normalizedDavid = normalizeTranscript(lastDavidResponseRef.current);
+    if (!normalizedUser || !normalizedDavid) return false;
+    return transcriptsAreSimilar(normalizedDavid, normalizedUser);
+  };
+
   // ── Handle voice input (transcript → AI → TTS) ────────────────────────────
   const handleVoiceInput = async (text: string) => {
     const trimmedText = text.trim();
@@ -505,6 +514,14 @@ export default function VoiceScreen({ route, navigation }: any) {
     }
 
     const normalized = normalizeTranscript(trimmedText);
+    if (isLikelyDavidEcho(trimmedText)) {
+      emptyTranscriptStreakRef.current += 1;
+      addLog('Rejected transcript echoing David');
+      setConversationState('listening');
+      scheduleListenRetry('David echo rejected');
+      return;
+    }
+
     if (isDuplicateTranscript(normalized, lastTranscriptRef.current, recentTranscriptsRef.current)) {
       emptyTranscriptStreakRef.current += 1;
       addLog('Rejected duplicate transcript');
@@ -853,7 +870,14 @@ export default function VoiceScreen({ route, navigation }: any) {
     log('Requesting microphone permission');
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
       log('Microphone permission granted');
     } catch (err: any) {
       log('Microphone permission denied', err?.message);
@@ -1090,6 +1114,13 @@ export default function VoiceScreen({ route, navigation }: any) {
         }
 
         const normalized = normalizeTranscript(transcript);
+        if (isLikelyDavidEcho(transcript)) {
+          emptyTranscriptStreakRef.current += 1;
+          addLog('Transcript rejected as David echo');
+          scheduleListenRetry('David echo rejected');
+          return;
+        }
+
         if (isDuplicateTranscript(normalized, lastTranscriptRef.current, recentTranscriptsRef.current)) {
           emptyTranscriptStreakRef.current += 1;
           addLog('Duplicate transcript from Whisper');

@@ -30,6 +30,7 @@ export interface Scripture {
 export interface SavedScripture extends Scripture {
   id: string;
   user_id: string;
+  text: string;
   version: string;
   category?: string;
   is_memorized: boolean;

@@ -91,6 +91,21 @@ export default async function handler(req: any, res: any) {
     return null;
   };
 
+  const updateProfileOrThrow = async (profileId: string, changes: Record<string, unknown>, context: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(changes)
+      .eq('id', profileId)
+      .select('id');
+
+    if (error) {
+      throw new Error(`${context} failed for user ${profileId}: ${error.message}`);
+    }
+    if (!data || data.length === 0) {
+      throw new Error(`${context} affected 0 profile rows for user ${profileId}`);
+    }
+  };
+
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
@@ -103,25 +118,24 @@ export default async function handler(req: any, res: any) {
 
         const profile = await findProfile(customerId, customerEmail, userIdMetadata);
         
-        if (profile) {
-          console.log(`[Stripe Webhook] Upgrading user ${profile.id} to Pro...`);
-          const { error } = await supabase.from('profiles').update({
+        if (!profile) {
+          throw new Error(`Could not resolve profile for checkout session ${session.id}`);
+        }
+
+        console.log(`[Stripe Webhook] Upgrading user ${profile.id} to Pro...`);
+        await updateProfileOrThrow(
+          profile.id,
+          {
             stripe_customer_id: customerId,
             subscription_tier: 'pro',
             subscription_status: 'active',
             plan: 'pro',
             stripe_subscription_status: 'active',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
-
-          if (error) {
-            console.error(`[Stripe Webhook] UPDATE FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
-          }
-        } else {
-          console.error(`[Stripe Webhook] CRITICAL: Could not resolve profile for checkout session ${session.id}`);
-        }
+          },
+          'Checkout entitlement update'
+        );
+        console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
         break;
       }
       
@@ -136,9 +150,14 @@ export default async function handler(req: any, res: any) {
 
         const profile = await findProfile(customerId, customerEmail);
 
-        if (profile) {
-          console.log(`[Stripe Webhook] Confirming Pro status for user ${profile.id}...`);
-          const { error } = await supabase.from('profiles').update({
+        if (!profile) {
+          throw new Error(`Could not resolve profile for invoice ${invoice.id}`);
+        }
+
+        console.log(`[Stripe Webhook] Confirming Pro status for user ${profile.id}...`);
+        await updateProfileOrThrow(
+          profile.id,
+          {
             stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             subscription_tier: 'pro',
@@ -146,14 +165,10 @@ export default async function handler(req: any, res: any) {
             plan: 'pro',
             stripe_subscription_status: 'active',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
-          
-          if (error) {
-            console.error(`[Stripe Webhook] UPDATE FAILED for user ${profile.id} on invoice: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
-          }
-        }
+          },
+          'Invoice entitlement update'
+        );
+        console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
         break;
       }
       
@@ -172,9 +187,14 @@ export default async function handler(req: any, res: any) {
 
         const profile = await findProfile(customerId, null, userIdMetadata);
         
-        if (profile) {
-          console.log(`[Stripe Webhook] Syncing user ${profile.id} to tier ${tier}...`);
-          const { error } = await supabase.from('profiles').update({
+        if (!profile) {
+          throw new Error(`Could not resolve profile for subscription ${subscription.id}`);
+        }
+
+        console.log(`[Stripe Webhook] Syncing user ${profile.id} to tier ${tier}...`);
+        await updateProfileOrThrow(
+          profile.id,
+          {
             stripe_customer_id: customerId,
             stripe_subscription_id: subscription.id,
             subscription_tier: tier,
@@ -182,14 +202,10 @@ export default async function handler(req: any, res: any) {
             plan: tier,
             stripe_subscription_status: status,
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
-
-          if (error) {
-            console.error(`[Stripe Webhook] SYNC FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
-          }
-        }
+          },
+          'Subscription entitlement sync'
+        );
+        console.log(`[Stripe Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
         break;
       }
       
@@ -201,22 +217,23 @@ export default async function handler(req: any, res: any) {
 
         const profile = await findProfile(customerId, null);
         
-        if (profile) {
-          console.log(`[Stripe Webhook] Reverting user ${profile.id} to Free...`);
-          const { error } = await supabase.from('profiles').update({
+        if (!profile) {
+          throw new Error(`Could not resolve profile for deleted subscription ${subscription.id}`);
+        }
+
+        console.log(`[Stripe Webhook] Reverting user ${profile.id} to Free...`);
+        await updateProfileOrThrow(
+          profile.id,
+          {
             subscription_tier: 'free',
             subscription_status: 'canceled',
             plan: 'free',
             stripe_subscription_status: 'canceled',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
-
-          if (error) {
-            console.error(`[Stripe Webhook] CANCELLATION FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] CANCELLATION SUCCESS: User ${profile.id} downgraded to free.`);
-          }
-        }
+          },
+          'Subscription cancellation update'
+        );
+        console.log(`[Stripe Webhook] CANCELLATION SUCCESS: User ${profile.id} downgraded to free.`);
         break;
       }
       default:
