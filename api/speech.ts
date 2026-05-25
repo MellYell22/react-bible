@@ -11,6 +11,14 @@ type GenerationConfig = {
   emotion: string;
 };
 
+type VoiceTuning = GenerationConfig & {
+  ssmlEmotion: string;
+  ssmlSpeed: number;
+  openerPauseMs: number;
+  phrasePauseMs: number;
+  sentencePauseMs: number;
+};
+
 const VALID_CARTESIA_EMOTIONS = new Set([
   'happy',
   'excited',
@@ -107,29 +115,67 @@ function chooseDavidEmotion(text: string): string {
   const lower = text.toLowerCase();
 
   if (/\b(grief|grieving|loss|lost someone|died|passed away|heartbroken|mourning)\b/.test(lower)) {
-    return 'sad';
+    return 'sympathetic';
   }
 
-  if (/\b(scared|afraid|panic|panicked|terrified|danger|unsafe)\b/.test(lower)) {
-    return 'scared';
+  if (/\b(scared|afraid|panic|panicked|terrified|danger|unsafe|anxious|anxiety|worried|overwhelmed)\b/.test(lower)) {
+    return 'calm';
   }
 
-  if (/\b(thankful|grateful|blessed|hopeful|hope|peace|calm|grace|mercy|amen|prayer|pray)\b/.test(lower)) {
-    return 'content';
+  if (/\?\s*$|\b(why|how|what|when|where|should i|can i|could i)\b/.test(lower)) {
+    return 'curious';
+  }
+
+  if (/\b(thankful|grateful|blessed|hopeful|hope|peace|calm|grace|mercy|amen|prayer|pray|joy|joyful)\b/.test(lower)) {
+    return 'grateful';
   }
 
   return 'content';
 }
 
-function buildGenerationConfig(text: string): GenerationConfig {
+function buildVoiceTuning(text: string): VoiceTuning {
+  const lower = text.toLowerCase();
+  const emotion = chooseDavidEmotion(text);
+
+  const comfortTone = /\b(grief|grieving|loss|lost someone|died|passed away|heartbroken|mourning|sad|lonely|alone|heavy|hurt|guilty|ashamed|overwhelmed|anxious|anxiety|worried|afraid|panic|scared)\b/.test(lower);
+  const reflectiveTone = /\b(pray|prayer|peace|rest|still|scripture|psalm|isaiah|john|jesus|lord|grace|mercy|hope)\b/.test(lower);
+  const questionTone = /\?\s*$|\b(why|how|what|when|where|should i|can i|could i)\b/.test(lower);
+
+  const baseSpeed = comfortTone ? 0.86 : questionTone ? 0.93 : reflectiveTone ? 0.88 : 0.9;
+  const ssmlSpeed = comfortTone ? 0.88 : questionTone ? 0.94 : reflectiveTone ? 0.9 : 0.92;
+
+  const configuredEmotion = normalizeEmotion(process.env.CARTESIA_TTS_EMOTION);
+  const configuredSsmlEmotion = normalizeEmotion(process.env.CARTESIA_TTS_SSML_EMOTION);
+
   return {
-    speed: clampNumber(Number(process.env.CARTESIA_TTS_SPEED || 0.88), 0.88, 0.6, 1.5),
+    speed: clampNumber(Number(process.env.CARTESIA_TTS_SPEED || baseSpeed), baseSpeed, 0.6, 1.5),
     volume: clampNumber(Number(process.env.CARTESIA_TTS_VOLUME || 0.96), 0.96, 0.5, 2.0),
-    emotion: chooseDavidEmotion(text),
+    emotion: configuredEmotion || emotion,
+    ssmlEmotion: configuredSsmlEmotion || configuredEmotion || emotion,
+    ssmlSpeed: clampNumber(Number(process.env.CARTESIA_TTS_SSML_SPEED || ssmlSpeed), ssmlSpeed, 0.6, 1.5),
+    openerPauseMs: comfortTone ? 280 : 220,
+    phrasePauseMs: comfortTone ? 220 : 170,
+    sentencePauseMs: comfortTone ? 360 : questionTone ? 240 : 300,
   };
 }
 
-function addNaturalBreaks(text: string): string {
+function addPhraseBreaks(sentence: string, tuning: VoiceTuning): string {
+  return sentence
+    .replace(
+      /\b(I hear you|I'm with you|I am with you|That is a lot|That's a lot|That feels heavy|That sounds heavy|I'm glad you told me|I understand),\s+/gi,
+      (_match, phrase: string) => `${phrase},<break time="${tuning.openerPauseMs}ms"/> `,
+    )
+    .replace(
+      /,\s+(?=(and|but|because|so|then|when|if|like|that)\b)/gi,
+      `,<break time="${tuning.phrasePauseMs}ms"/> `,
+    )
+    .replace(
+      /\b(Psalm|Proverbs|Isaiah|Matthew|John|Romans|Philippians|Jeremiah)\s+(\d+)/gi,
+      (_match, book: string, chapter: string) => `${book} ${chapter}`,
+    );
+}
+
+function addNaturalBreaks(text: string, tuning: VoiceTuning): string {
   const sentences = text
     .split(/(?<=[.!?])\s+/)
     .map(sentence => sentence.trim())
@@ -137,19 +183,21 @@ function addNaturalBreaks(text: string): string {
 
   const pacedText = sentences
     .map((sentence, index) => {
-      if (index >= sentences.length - 1 || index >= 2) return sentence;
-      return `${sentence}<break time="240ms"/>`;
+      const phrasePacedSentence = addPhraseBreaks(sentence, tuning);
+      if (index >= sentences.length - 1 || index >= 2) return phrasePacedSentence;
+      return `${phrasePacedSentence}<break time="${tuning.sentencePauseMs}ms"/>`;
     })
     .join(' ');
 
   return pacedText.replace(
     /^(mm|hmm|hm|yeah|hey|okay|alright)[,.]\s+/i,
-    (_match, opener: string) => `${opener},<break time="180ms"/> `,
+    (_match, opener: string) => `${opener},<break time="${tuning.openerPauseMs}ms"/> `,
   );
 }
 
-function buildSpokenTranscript(text: string): string {
-  return addNaturalBreaks(text);
+function buildSpokenTranscript(text: string, tuning: VoiceTuning): string {
+  const tags = `<emotion value="${tuning.ssmlEmotion}"/><speed ratio="${tuning.ssmlSpeed.toFixed(2)}"/>`;
+  return `${tags}${addNaturalBreaks(text, tuning)}`;
 }
 
 function buildRequestHeaders(apiKey: string, authMode: CartesiaAuthMode): Record<string, string> {
@@ -166,10 +214,12 @@ function buildRequestHeaders(apiKey: string, authMode: CartesiaAuthMode): Record
   };
 }
 
-function buildCartesiaBody(voiceId: string, text: string, config: GenerationConfig): Record<string, unknown> {
+function buildCartesiaBody(voiceId: string, text: string, tuning: VoiceTuning): Record<string, unknown> {
+  const { ssmlEmotion, ssmlSpeed, openerPauseMs, phrasePauseMs, sentencePauseMs, ...generationConfig } = tuning;
+
   return {
     model_id: CARTESIA_MODEL_ID,
-    transcript: buildSpokenTranscript(text),
+    transcript: buildSpokenTranscript(text, tuning),
     voice: {
       id: voiceId,
     },
@@ -179,7 +229,7 @@ function buildCartesiaBody(voiceId: string, text: string, config: GenerationConf
       bit_rate: 128000,
       sample_rate: 44100,
     },
-    generation_config: config,
+    generation_config: generationConfig,
   };
 }
 
@@ -187,7 +237,7 @@ async function callCartesia(
   apiKey: string,
   voiceId: string,
   text: string,
-  config: GenerationConfig,
+  config: VoiceTuning,
   authMode: CartesiaAuthMode,
 ): Promise<Response> {
   return fetch(CARTESIA_TTS_URL, {
@@ -246,10 +296,10 @@ export default async function handler(req: any, res: any) {
   }
 
   const voiceId = resolveCartesiaVoiceId(process.env.CARTESIA_VOICE_ID);
-  const config = buildGenerationConfig(text);
+  const config = buildVoiceTuning(text);
 
   console.log(
-    `[Speech API] David voice request model=${CARTESIA_MODEL_ID}, voice=${voiceId}, speed=${config.speed}, volume=${config.volume}, emotion=${config.emotion}, text="${text.substring(0, 70)}..."`
+    `[Speech API] David voice request model=${CARTESIA_MODEL_ID}, voice=${voiceId}, speed=${config.speed}, ssmlSpeed=${config.ssmlSpeed}, volume=${config.volume}, emotion=${config.emotion}, ssmlEmotion=${config.ssmlEmotion}, text="${text.substring(0, 70)}..."`
   );
 
   try {
