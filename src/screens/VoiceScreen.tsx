@@ -120,7 +120,7 @@ export default function VoiceScreen({ route, navigation }: any) {
   const MAX_MIC_RETRIES = 1; // Show text fallback after 1 network failure (network errors are persistent)
   // Silence / speech-end detection (MediaRecorder + AudioContext)
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isProcessingVoiceRef = useRef(false);
   const lastTranscriptRef = useRef<string>('');
   const emptyTranscriptStreakRef = useRef(0);
