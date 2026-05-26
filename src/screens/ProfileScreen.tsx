@@ -21,7 +21,7 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isActivating, setIsActivating] = useState(false);
   const hasHandledRedirect = useRef(false);
-  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
+  const pollingInterval = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const pricingRef = useRef<View>(null);
 
