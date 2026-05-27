@@ -3,6 +3,8 @@
 export const JUNK_TRANSCRIPT_PATTERNS = [
   /^[\s.…,!?*-]+$/,
   /^(thank you|thanks for watching|subscribe|you|bye|goodbye|okay|ok|um+|uh+|hmm+|ah+|oh+)[.!?\s]*$/i,
+  /^(thank you|thanks) for (watching|listening)[.!?\s]*$/i,
+  /^spiritual conversation in english[.!?\s]*$/i,
   /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
   /^(the|a|an|i|it|so|and|but|or|well)[.!?\s]*$/i,
 ];
@@ -10,6 +12,7 @@ export const JUNK_TRANSCRIPT_PATTERNS = [
 /** Throat clear, cough, breath — common Whisper outputs on noise. */
 export const NOISE_TRANSCRIPT_PATTERNS = [
   /^(a+h*|u+h*m*|hmm*|mm+|mhm+|uh+h*|oh+h*)[.!?\s]*$/i,
+  /^(uh huh|mm hmm|mhm hmm|huh)[.!?\s]*$/i,
   /^(cough|coughing|\*cough\*|clears? throat|sniff|sneeze|burp|yawn)[.!?\s]*$/i,
   /^(breathing|inhales?|exhales?|sigh|sighs)[.!?\s]*$/i,
   /^\[.*\]$/,
@@ -22,8 +25,11 @@ const OPENING_GREETING_PATTERNS = [
   /^hi[,.]?\s/i,
   /^hello[,.]?\s/i,
   /^good to see/i,
+  /^i'?m david/i,
   /^what'?s (been on your mind|going on|up)/i,
+  /^what'?s been on your heart/i,
   /^how'?s your (heart|night|day)/i,
+  /^how are you holding up/i,
   /^glad you came back/i,
   /^what'?s been weighing/i,
   /^there you are/i,
@@ -56,7 +62,7 @@ const BANNED_THERAPY_PHRASE_PATTERNS = [
 ];
 
 export const MIN_MEANINGFUL_WORDS = 2;
-export const MIN_MEANINGFUL_LETTERS = 8;
+export const MIN_MEANINGFUL_LETTERS = 5;
 
 export function normalizeTranscript(text: string): string {
   return text.trim().toLowerCase().replace(/\s+/g, ' ');

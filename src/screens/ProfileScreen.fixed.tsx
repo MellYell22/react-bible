@@ -314,7 +314,7 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
 
                 {expandedId === item.id && (
                   <View style={styles.savedCardContent}>
-                    <Text style={styles.savedText}>"{item.text}"</Text>
+                    <Text style={styles.savedText}>"{item.verse}"</Text>
 
                     <View style={styles.categoryInputRow}>
                       <Text style={styles.categoryLabel}>CATEGORY</Text>

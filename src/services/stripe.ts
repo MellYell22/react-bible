@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-export const createCheckoutSession = async (priceId: string) => {
+export const createCheckoutSession = async (priceId?: string | null) => {
   console.log("Using Stripe Price ID:", priceId);
   console.log(`[StripeDebug] Initiating upgrade. PriceId: ${priceId}`);
   

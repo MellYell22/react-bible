@@ -3,19 +3,22 @@ import OpenAI from 'openai';
 const JUNK_TRANSCRIPT_PATTERNS = [
   /^[\s.…,!?*-]+$/,
   /^(thank you|thanks for watching|subscribe|you|bye|goodbye|okay|ok|um+|uh+|hmm+|ah+|oh+)[.!?\s]*$/i,
+  /^(thank you|thanks) for (watching|listening)[.!?\s]*$/i,
+  /^spiritual conversation in english[.!?\s]*$/i,
   /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
   /^(the|a|an|i|it|so|and|but|or|well)[.!?\s]*$/i,
 ];
 
 const NOISE_TRANSCRIPT_PATTERNS = [
   /^(a+h*|u+h*m*|hmm*|mm+|mhm+|uh+h*|oh+h*)[.!?\s]*$/i,
+  /^(uh huh|mm hmm|mhm hmm|huh)[.!?\s]*$/i,
   /^(cough|coughing|\*cough\*|clears? throat|sniff|sneeze|burp|yawn)[.!?\s]*$/i,
   /^(breathing|inhales?|exhales?|sigh|sighs)[.!?\s]*$/i,
   /^\[.*\]$/,
 ];
 
 const MIN_MEANINGFUL_WORDS = 2;
-const MIN_MEANINGFUL_LETTERS = 8;
+const MIN_MEANINGFUL_LETTERS = 5;
 const MIN_AUDIO_BYTES = 5000;
 
 function isJunkTranscript(normalized: string): boolean {
@@ -149,8 +152,6 @@ export default async function handler(req: any, res: any) {
       model: 'whisper-1',
       language: 'en',
       response_format: 'json',
-      // Neutral prompt reduces conversational hallucinations on non-speech audio
-      prompt: 'Spiritual conversation in English.',
       temperature: 0,
     });
 

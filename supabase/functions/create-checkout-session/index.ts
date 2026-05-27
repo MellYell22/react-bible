@@ -24,15 +24,26 @@ serve(async (req) => {
   try {
     const body = await req.json();
     console.log("[create-checkout-session] Received body:", JSON.stringify(body));
-    const { priceId } = body;
+    const requestedPriceId = body?.priceId;
+    const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
 
-    if (!priceId) {
-      console.error("[create-checkout-session] Error: Missing priceId");
+    if (!proPriceId) {
+      console.error("[create-checkout-session] CRITICAL: STRIPE_PRICE_ID_PRO is not set in Supabase secrets.");
       return new Response(
-        JSON.stringify({ error: "Missing priceId" }),
+        JSON.stringify({ error: "Server configuration error: Pro price missing." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (requestedPriceId && requestedPriceId !== proPriceId) {
+      console.error(`[create-checkout-session] Rejected unexpected priceId: ${requestedPriceId}`);
+      return new Response(
+        JSON.stringify({ error: "Invalid checkout price." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const priceId = proPriceId;
 
     // Get user strictly from JWT to verify and get identity
     let userId: string | undefined = undefined;

@@ -17,7 +17,7 @@ import {
   looksLikeBannedTherapyPhrase,
   normalizeTranscript,
 } from '../utils/voiceTranscript';
-import { getVoiceSessionGreeting, DAVID_ANTI_REPEAT_FALLBACKS } from '../constants/persona';
+import { getDavidGreeting, DAVID_ANTI_REPEAT_FALLBACKS } from '../constants/davidPersona';
 import { humanizeForTts, preSpeechThinkingDelay, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 
 const TTS_START_TIMEOUT_MS = 2500;
@@ -119,7 +119,7 @@ export default function VoiceScreen({ route, navigation }: any) {
   const MAX_MIC_RETRIES = 1; // Show text fallback after 1 network failure (network errors are persistent)
   // Silence / speech-end detection (MediaRecorder + AudioContext)
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isProcessingVoiceRef = useRef(false);
   const lastTranscriptRef = useRef<string>('');
   const emptyTranscriptStreakRef = useRef(0);
@@ -134,15 +134,15 @@ export default function VoiceScreen({ route, navigation }: any) {
   const activeVoiceTurnRef = useRef(0);
   const playbackTokenRef = useRef(0);
 
-  // RMS thresholds — permissive enough to resume natural turn-taking after TTS.
-  const SPEECH_RMS_THRESHOLD = 0.016;
+  // RMS thresholds — require sustained speech so coughs, reverb, and speaker bleed do not become turns.
+  const SPEECH_RMS_THRESHOLD = 0.02;
   const SILENCE_RMS_THRESHOLD = 0.006;
   const SILENCE_DURATION_MS = 925;
-  const MIN_SPEECH_MS = 360;
-  const MIN_SUSTAINED_SPEECH_FRAMES = 3;
+  const MIN_SPEECH_MS = 700;
+  const MIN_SUSTAINED_SPEECH_FRAMES = 5;
   const MIN_RECORDING_MS = 650;
-  const MIN_AUDIO_BYTES = 2200;
-  const POST_TTS_MIC_DELAY_MS = 520;
+  const MIN_AUDIO_BYTES = 5000;
+  const POST_TTS_MIC_DELAY_MS = 1800;
   const MIC_RESTART_BASE_MS = 250;
   const MIC_RESTART_MAX_MS = 1600;
   const NO_SPEECH_DISCARD_MS = 15000;
@@ -432,7 +432,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     // Humanization is intentionally disabled here because greetings are already
     // written to sound natural, and prefixes like "heh. hey. how's your day been?"
     // sound awkward as an opening line.
-    const greeting = humanizeForTts(getVoiceSessionGreeting(firstName || undefined), {
+    const greeting = humanizeForTts(getDavidGreeting(firstName || undefined), {
       isGreeting: false,
       force: true,
     });

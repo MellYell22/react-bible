@@ -4,11 +4,14 @@ import { CheckCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useUser } from '../UserContext';
 import { FullScreenBackground } from '../components/FullScreenBackground';
+import { hasProAccess } from '../utils/tier';
 
 export default function PaymentSuccessScreen({ navigation }: { navigation: any }) {
   const { profile, refreshProfile } = useUser();
   const [isActivating, setIsActivating] = useState(true);
+  const [activationTimedOut, setActivationTimedOut] = useState(false);
   const [attempts, setAttempts] = useState(0);
+  const proAccessActive = !!profile && hasProAccess(profile);
 
   useEffect(() => {
     // Start polling for the pro status
@@ -19,6 +22,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
         if (next >= 30) { // Poll for up to 90 seconds
           console.warn('[PaymentSuccess] Polling timed out after 90 seconds.');
           clearInterval(interval);
+          setActivationTimedOut(true);
           setIsActivating(false);
           return next;
         }
@@ -37,9 +41,10 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
 
   useEffect(() => {
     console.log(`[PaymentSuccess] UI Check - Profile: ${profile?.id}, Tier: ${profile?.subscription_tier}, Status: ${profile?.stripe_subscription_status}`);
-    if (profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'owner' || (profile as any)?.subscription_status === 'active') {
+    if (proAccessActive) {
       console.log('[PaymentSuccess] PRO STATUS DETECTED! Unlocking app features.');
       setIsActivating(false);
+      setActivationTimedOut(false);
       
       // Auto-redirect after a small delay to let user see success
       const timeout = setTimeout(() => {
@@ -47,7 +52,14 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
       }, 3000);
       return () => clearTimeout(timeout);
     }
-  }, [profile?.subscription_tier]);
+  }, [proAccessActive]);
+
+  const handleProfile = () => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Profile' }],
+    });
+  };
 
   const handleContinue = () => {
     // Redirect to main app entry (Mood)
@@ -93,16 +105,22 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
           </View>
 
           <Text style={styles.title}>
-            {isActivating ? 'HEAVENLY SYNC IN PROGRESS' : 'GLORY! YOU ARE PRO'}
+            {isActivating
+              ? 'HEAVENLY SYNC IN PROGRESS'
+              : activationTimedOut && !proAccessActive
+                ? 'STILL ACTIVATING'
+                : 'GLORY! YOU ARE PRO'}
           </Text>
 
           <Text style={styles.description}>
-            {isActivating 
+            {isActivating
               ? 'Our systems are receiving the confirmation from Stripe. Your account will be transformed into Pro momentarily...'
-              : 'Your transformation is complete. You now have unlimited access to AI insights and deeper scripture reflections.'}
+              : activationTimedOut && !proAccessActive
+                ? 'Your payment is still being confirmed. Please check your Profile shortly; Pro access will appear after Stripe confirmation is received.'
+                : 'Your transformation is complete. You now have unlimited access to AI insights and deeper scripture reflections.'}
           </Text>
 
-          {!isActivating && (
+          {!isActivating && proAccessActive && (
             <TouchableOpacity 
               style={styles.button} 
               onPress={handleContinue}
@@ -113,10 +131,21 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
             </TouchableOpacity>
           )}
 
+          {!isActivating && activationTimedOut && !proAccessActive && (
+            <TouchableOpacity
+              style={styles.button}
+              onPress={handleProfile}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.buttonText}>CHECK PROFILE</Text>
+              <ArrowRight color="#0b1e3d" size={20} />
+            </TouchableOpacity>
+          )}
+
           {isActivating && attempts > 10 && (
             <TouchableOpacity 
               style={styles.troubleButton} 
-              onPress={handleContinue}
+              onPress={handleProfile}
             >
               <Text style={styles.troubleText}>Taking too long? Go to Profile</Text>
             </TouchableOpacity>

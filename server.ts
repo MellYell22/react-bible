@@ -56,6 +56,27 @@ const supabase = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
+function getProPriceId(): string {
+  const proPriceId = process.env.STRIPE_PRICE_ID_PRO;
+  if (!proPriceId) {
+    throw new Error("STRIPE_PRICE_ID_PRO is not configured");
+  }
+  return proPriceId;
+}
+
+function requireProPrice(priceId: string | null | undefined, context: string): void {
+  const proPriceId = getProPriceId();
+  if (!priceId || priceId !== proPriceId) {
+    throw new Error(`Unverified Stripe price for ${context}: ${priceId || "missing"}`);
+  }
+}
+
+function assertUpdatedRows(data: unknown[] | null | undefined, context: string) {
+  if (!data || data.length === 0) {
+    throw new Error(`${context} affected 0 profile rows`);
+  }
+}
+
 app.use(express.json({
   verify: (req: any, res, buf) => {
     if (req.url?.startsWith('/api/stripe-webhook')) {
@@ -146,27 +167,32 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         const userIdMetadata = session.client_reference_id || session.metadata?.userId || session.metadata?.user_id;
         
         console.log(`[Server Webhook] Processing session ${session.id} for user metadata: ${userIdMetadata}`);
+        const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
+        const priceId = lineItems.data[0]?.price?.id;
+        requireProPrice(priceId, `checkout session ${session.id}`);
 
         const profile = await findProfile(customerId, customerEmail, userIdMetadata);
         
         if (profile) {
           console.log(`[Server Webhook] Upgrading user ${profile.id} to Pro...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             subscription_tier: 'pro',
             subscription_status: 'active',
             plan: 'pro',
             stripe_subscription_status: 'active',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Server Webhook] UPDATE FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Server Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Checkout update for user ${profile.id}`);
+          console.log(`[Server Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
         } else {
           console.error(`[Server Webhook] CRITICAL: Could not resolve profile for checkout session ${session.id}`);
+          throw new Error(`Could not resolve profile for checkout session ${session.id}`);
         }
         break;
       }
@@ -179,12 +205,18 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         const subscriptionId = invoice.subscription as string;
 
         console.log(`[Server Webhook] Processing invoice ${invoice.id} for customer ${customerId}`);
+        if (!subscriptionId) {
+          throw new Error(`Invoice ${invoice.id} is missing subscription id`);
+        }
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const priceId = subscription.items.data[0]?.price?.id;
+        requireProPrice(priceId, `invoice ${invoice.id}`);
 
         const profile = await findProfile(customerId, customerEmail);
 
         if (profile) {
           console.log(`[Server Webhook] Confirming Pro status for user ${profile.id}...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             subscription_tier: 'pro',
@@ -192,13 +224,16 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
             plan: 'pro',
             stripe_subscription_status: 'active',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
           
           if (error) {
             console.error(`[Server Webhook] UPDATE FAILED for user ${profile.id} on invoice: ${error.message}`);
-          } else {
-            console.log(`[Server Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Invoice update for user ${profile.id}`);
+          console.log(`[Server Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
+        } else {
+          throw new Error(`Could not resolve profile for invoice ${invoice.id}`);
         }
         break;
       }
@@ -209,9 +244,11 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         const customerId = subscription.customer as string;
         const userIdMetadata = subscription.metadata?.userId || subscription.metadata?.user_id;
         const status = subscription.status;
+        const priceId = subscription.items.data[0]?.price?.id;
         
         // Map any "paying" status to pro
         const isPro = status === 'active' || status === 'trialing';
+        if (isPro) requireProPrice(priceId, `subscription ${subscription.id}`);
         const tier = isPro ? 'pro' : 'free';
 
         console.log(`[Server Webhook] Syncing subscription ${subscription.id} status: ${status} for user: ${userIdMetadata}`);
@@ -220,7 +257,7 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         
         if (profile) {
           console.log(`[Server Webhook] Syncing user ${profile.id} to tier ${tier}...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             stripe_subscription_id: subscription.id,
             subscription_tier: tier,
@@ -228,13 +265,16 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
             plan: tier,
             stripe_subscription_status: status,
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Server Webhook] SYNC FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Server Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Subscription sync for user ${profile.id}`);
+          console.log(`[Server Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
+        } else {
+          throw new Error(`Could not resolve profile for subscription ${subscription.id}`);
         }
         break;
       }
@@ -249,19 +289,22 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         
         if (profile) {
           console.log(`[Server Webhook] Reverting user ${profile.id} to Free...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             subscription_tier: 'free',
             subscription_status: 'canceled',
             plan: 'free',
             stripe_subscription_status: 'canceled',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Server Webhook] CANCELLATION FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Server Webhook] CANCELLATION SUCCESS: User ${profile.id} downgraded to free.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Cancellation update for user ${profile.id}`);
+          console.log(`[Server Webhook] CANCELLATION SUCCESS: User ${profile.id} downgraded to free.`);
+        } else {
+          throw new Error(`Could not resolve profile for canceled subscription ${subscription.id}`);
         }
         break;
       }
@@ -525,15 +568,18 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
 
     const MIN_AUDIO_BYTES = 5000;
     const MIN_MEANINGFUL_WORDS = 2;
-    const MIN_MEANINGFUL_LETTERS = 8;
+    const MIN_MEANINGFUL_LETTERS = 5;
     const junkPatterns = [
       /^[\s.…,!?*-]+$/,
       /^(thank you|thanks for watching|subscribe|you|bye|goodbye|okay|ok|um+|uh+|hmm+|ah+|oh+)[.!?\s]*$/i,
+      /^(thank you|thanks) for (watching|listening)[.!?\s]*$/i,
+      /^spiritual conversation in english[.!?\s]*$/i,
       /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
       /^(the|a|an|i|it|so|and|but|or|well)[.!?\s]*$/i,
     ];
     const noisePatterns = [
       /^(a+h*|u+h*m*|hmm*|mm+|mhm+|uh+h*|oh+h*)[.!?\s]*$/i,
+      /^(uh huh|mm hmm|mhm hmm|huh)[.!?\s]*$/i,
       /^(cough|coughing|\*cough\*|clears? throat|sniff|sneeze|burp|yawn)[.!?\s]*$/i,
       /^(breathing|inhales?|exhales?|sigh|sighs)[.!?\s]*$/i,
       /^\[.*\]$/,
@@ -559,7 +605,6 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
       model: 'whisper-1',
       language: 'en',
       response_format: 'json',
-      prompt: 'Spiritual conversation in English.',
       temperature: 0,
     });
 
