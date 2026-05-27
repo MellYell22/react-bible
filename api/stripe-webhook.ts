@@ -25,6 +25,27 @@ async function getRawBody(readable: any) {
   return Buffer.concat(chunks);
 }
 
+function getProPriceId(): string {
+  const proPriceId = process.env.STRIPE_PRICE_ID_PRO;
+  if (!proPriceId) {
+    throw new Error('STRIPE_PRICE_ID_PRO is not configured');
+  }
+  return proPriceId;
+}
+
+function requireProPrice(priceId: string | null | undefined, context: string): void {
+  const proPriceId = getProPriceId();
+  if (!priceId || priceId !== proPriceId) {
+    throw new Error(`Unverified Stripe price for ${context}: ${priceId || 'missing'}`);
+  }
+}
+
+function assertUpdatedRows(data: unknown[] | null | undefined, context: string) {
+  if (!data || data.length === 0) {
+    throw new Error(`${context} affected 0 profile rows`);
+  }
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -100,27 +121,32 @@ export default async function handler(req: any, res: any) {
         const userIdMetadata = session.client_reference_id || session.metadata?.userId || session.metadata?.user_id;
         
         console.log(`[Stripe Webhook] Processing session ${session.id} for user metadata: ${userIdMetadata}`);
+        const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
+        const priceId = lineItems.data[0]?.price?.id;
+        requireProPrice(priceId, `checkout session ${session.id}`);
 
         const profile = await findProfile(customerId, customerEmail, userIdMetadata);
         
         if (profile) {
           console.log(`[Stripe Webhook] Upgrading user ${profile.id} to Pro...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             subscription_tier: 'pro',
             subscription_status: 'active',
             plan: 'pro',
             stripe_subscription_status: 'active',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Stripe Webhook] UPDATE FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Checkout update for user ${profile.id}`);
+          console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
         } else {
           console.error(`[Stripe Webhook] CRITICAL: Could not resolve profile for checkout session ${session.id}`);
+          throw new Error(`Could not resolve profile for checkout session ${session.id}`);
         }
         break;
       }
@@ -133,12 +159,18 @@ export default async function handler(req: any, res: any) {
         const subscriptionId = invoice.subscription as string;
 
         console.log(`[Stripe Webhook] Processing invoice ${invoice.id} for customer ${customerId}`);
+        if (!subscriptionId) {
+          throw new Error(`Invoice ${invoice.id} is missing subscription id`);
+        }
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const priceId = subscription.items.data[0]?.price?.id;
+        requireProPrice(priceId, `invoice ${invoice.id}`);
 
         const profile = await findProfile(customerId, customerEmail);
 
         if (profile) {
           console.log(`[Stripe Webhook] Confirming Pro status for user ${profile.id}...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             subscription_tier: 'pro',
@@ -146,13 +178,16 @@ export default async function handler(req: any, res: any) {
             plan: 'pro',
             stripe_subscription_status: 'active',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
           
           if (error) {
             console.error(`[Stripe Webhook] UPDATE FAILED for user ${profile.id} on invoice: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Invoice update for user ${profile.id}`);
+          console.log(`[Stripe Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
+        } else {
+          throw new Error(`Could not resolve profile for invoice ${invoice.id}`);
         }
         break;
       }
@@ -163,9 +198,11 @@ export default async function handler(req: any, res: any) {
         const customerId = subscription.customer as string;
         const userIdMetadata = subscription.metadata?.userId || subscription.metadata?.user_id;
         const status = subscription.status;
+        const priceId = subscription.items.data[0]?.price?.id;
         
         // Map any "paying" status to pro
         const isPro = status === 'active' || status === 'trialing';
+        if (isPro) requireProPrice(priceId, `subscription ${subscription.id}`);
         const tier = isPro ? 'pro' : 'free';
 
         console.log(`[Stripe Webhook] Syncing subscription ${subscription.id} status: ${status} for user: ${userIdMetadata}`);
@@ -174,7 +211,7 @@ export default async function handler(req: any, res: any) {
         
         if (profile) {
           console.log(`[Stripe Webhook] Syncing user ${profile.id} to tier ${tier}...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             stripe_subscription_id: subscription.id,
             subscription_tier: tier,
@@ -182,13 +219,16 @@ export default async function handler(req: any, res: any) {
             plan: tier,
             stripe_subscription_status: status,
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Stripe Webhook] SYNC FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Subscription sync for user ${profile.id}`);
+          console.log(`[Stripe Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
+        } else {
+          throw new Error(`Could not resolve profile for subscription ${subscription.id}`);
         }
         break;
       }
@@ -203,19 +243,22 @@ export default async function handler(req: any, res: any) {
         
         if (profile) {
           console.log(`[Stripe Webhook] Reverting user ${profile.id} to Free...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             subscription_tier: 'free',
             subscription_status: 'canceled',
             plan: 'free',
             stripe_subscription_status: 'canceled',
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Stripe Webhook] CANCELLATION FAILED for user ${profile.id}: ${error.message}`);
-          } else {
-            console.log(`[Stripe Webhook] CANCELLATION SUCCESS: User ${profile.id} downgraded to free.`);
+            throw error;
           }
+          assertUpdatedRows(data, `Cancellation update for user ${profile.id}`);
+          console.log(`[Stripe Webhook] CANCELLATION SUCCESS: User ${profile.id} downgraded to free.`);
+        } else {
+          throw new Error(`Could not resolve profile for canceled subscription ${subscription.id}`);
         }
         break;
       }
