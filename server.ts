@@ -8,12 +8,8 @@ import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import { DAVID_PERSONALITY_PROMPT, DAVID_CHAT_TEMPERATURE } from './src/constants/persona';
 import { buildDavidSystemPromptWithMood, resolveMoodKey } from './src/utils/davidMoodContext';
-import {
-  CARTESIA_API_VERSION,
-  CARTESIA_MODEL_ID,
-  CARTESIA_TTS_URL,
-  resolveCartesiaVoiceId,
-} from './src/constants/cartesiaVoice';
+const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
+const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -277,14 +273,13 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
 
 // API Routes
 app.get("/api/health", (req, res) => {
-  const cartesiaVoiceId = resolveCartesiaVoiceId(process.env.CARTESIA_VOICE_ID);
-  res.json({ 
+  res.json({
     status: "ok", 
     stripeConfigured: !!getStripe(),
     supabaseConfigured: !!supabase,
     openaiConfigured: !!process.env.OPENAI_API_KEY,
-    cartesiaConfigured: !!process.env.CARTESIA_API_KEY,
-    cartesiaVoiceId,
+    elevenLabsConfigured: !!process.env.ELEVENLABS_API_KEY,
+    elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID || 'not set',
     env: process.env.NODE_ENV,
     appUrl: process.env.APP_URL || "not set"
   });
@@ -579,86 +574,6 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
   }
 });
 
-type LocalVoiceTuning = {
-  speed: number;
-  volume: number;
-  emotion: string;
-  ssmlEmotion: string;
-  ssmlSpeed: number;
-  openerPauseMs: number;
-  phrasePauseMs: number;
-  sentencePauseMs: number;
-};
-
-const clampVoiceNumber = (value: number, fallback: number, min: number, max: number): number => {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(max, value));
-};
-
-const chooseLocalDavidEmotion = (text: string): string => {
-  const configuredEmotion = process.env.CARTESIA_TTS_EMOTION?.trim().toLowerCase();
-  if (configuredEmotion) return configuredEmotion;
-
-  const lower = text.toLowerCase();
-  if (/\b(grief|grieving|loss|lost someone|died|passed away|heartbroken|mourning)\b/.test(lower)) return 'sympathetic';
-  if (/\b(scared|afraid|panic|panicked|terrified|danger|unsafe|anxious|anxiety|worried|overwhelmed)\b/.test(lower)) return 'calm';
-  if (/\?\s*$|\b(why|how|what|when|where|should i|can i|could i)\b/.test(lower)) return 'curious';
-  if (/\b(thankful|grateful|blessed|hopeful|hope|peace|calm|grace|mercy|amen|prayer|pray|joy|joyful)\b/.test(lower)) return 'grateful';
-
-  return 'content';
-};
-
-const buildLocalVoiceTuning = (text: string): LocalVoiceTuning => {
-  const lower = text.toLowerCase();
-  const comfortTone = /\b(grief|grieving|loss|lost someone|died|passed away|heartbroken|mourning|sad|lonely|alone|heavy|hurt|guilty|ashamed|overwhelmed|anxious|anxiety|worried|afraid|panic|scared)\b/.test(lower);
-  const reflectiveTone = /\b(pray|prayer|peace|rest|still|scripture|psalm|isaiah|john|jesus|lord|grace|mercy|hope)\b/.test(lower);
-  const questionTone = /\?\s*$|\b(why|how|what|when|where|should i|can i|could i)\b/.test(lower);
-  const emotion = chooseLocalDavidEmotion(text);
-  const baseSpeed = comfortTone ? 0.86 : questionTone ? 0.93 : reflectiveTone ? 0.88 : 0.9;
-  const ssmlSpeed = comfortTone ? 0.88 : questionTone ? 0.94 : reflectiveTone ? 0.9 : 0.92;
-
-  return {
-    speed: clampVoiceNumber(Number(process.env.CARTESIA_TTS_SPEED || baseSpeed), baseSpeed, 0.6, 1.5),
-    volume: clampVoiceNumber(Number(process.env.CARTESIA_TTS_VOLUME || 0.96), 0.96, 0.5, 2.0),
-    emotion,
-    ssmlEmotion: process.env.CARTESIA_TTS_SSML_EMOTION?.trim().toLowerCase() || emotion,
-    ssmlSpeed: clampVoiceNumber(Number(process.env.CARTESIA_TTS_SSML_SPEED || ssmlSpeed), ssmlSpeed, 0.6, 1.5),
-    openerPauseMs: comfortTone ? 280 : 220,
-    phrasePauseMs: comfortTone ? 220 : 170,
-    sentencePauseMs: comfortTone ? 360 : questionTone ? 240 : 300,
-  };
-};
-
-const addLocalPhraseBreaks = (sentence: string, tuning: LocalVoiceTuning): string =>
-  sentence
-    .replace(
-      /\b(I hear you|I'm with you|I am with you|That is a lot|That's a lot|That feels heavy|That sounds heavy|I'm glad you told me|I understand),\s+/gi,
-      (_match, phrase: string) => `${phrase},<break time="${tuning.openerPauseMs}ms"/> `,
-    )
-    .replace(
-      /,\s+(?=(and|but|because|so|then|when|if|like|that)\b)/gi,
-      `,<break time="${tuning.phrasePauseMs}ms"/> `,
-    );
-
-const buildLocalSpokenTranscript = (text: string, tuning: LocalVoiceTuning): string => {
-  const paced = text
-    .split(/(?<=[.!?])\s+/)
-    .map(sentence => sentence.trim())
-    .filter(Boolean)
-    .map((sentence, index, sentences) => {
-      const phrasePacedSentence = addLocalPhraseBreaks(sentence, tuning);
-      if (index >= sentences.length - 1 || index >= 2) return phrasePacedSentence;
-      return `${phrasePacedSentence}<break time="${tuning.sentencePauseMs}ms"/>`;
-    })
-    .join(' ')
-    .replace(
-      /^(mm|hmm|hm|yeah|hey|okay|alright)[,.]\s+/i,
-      (_match, opener: string) => `${opener},<break time="${tuning.openerPauseMs}ms"/> `,
-    );
-
-  return `<emotion value="${tuning.ssmlEmotion}"/><speed ratio="${tuning.ssmlSpeed.toFixed(2)}"/>${paced}`;
-};
-
 app.post("/api/speech", async (req, res) => {
   const { text } = req.body ?? {};
 
@@ -667,71 +582,60 @@ app.post("/api/speech", async (req, res) => {
     return res.status(400).json({ error: 'Missing text parameter' });
   }
 
-  // Strip any markup — Cartesia receives David's plain conversational text
   const cleanText = text.trim().replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
   if (!cleanText) {
     return res.status(400).json({ error: 'Text was empty after stripping markup' });
   }
 
-  const apiKey = process.env.CARTESIA_API_KEY;
+  const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
-    console.error('[Speech] CARTESIA_API_KEY is not configured');
-    return res.status(500).json({ error: 'Cartesia API key not configured. Add CARTESIA_API_KEY to environment.' });
+    console.error('[Speech] ELEVENLABS_API_KEY is not configured');
+    return res.status(500).json({ error: 'ElevenLabs API key not configured. Add ELEVENLABS_API_KEY to environment.' });
   }
 
-  const voiceId = resolveCartesiaVoiceId(process.env.CARTESIA_VOICE_ID);
-  const tuning = buildLocalVoiceTuning(cleanText);
-  const callCartesia = () =>
-    fetch(CARTESIA_TTS_URL, {
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  if (!voiceId) {
+    console.error('[Speech] ELEVENLABS_VOICE_ID is not configured');
+    return res.status(500).json({ error: 'ElevenLabs voice ID not configured. Add ELEVENLABS_VOICE_ID to environment.' });
+  }
+
+  try {
+    console.log(`[Speech] Calling ElevenLabs model=${ELEVENLABS_MODEL} voice=${voiceId} text="${cleanText.substring(0, 60)}..."`);
+    const response = await fetch(`${ELEVENLABS_TTS_URL}/${voiceId}`, {
       method: 'POST',
       headers: {
-        'X-API-Key': apiKey,
-        'Cartesia-Version': process.env.CARTESIA_API_VERSION || CARTESIA_API_VERSION,
+        'xi-api-key': apiKey,
         'Content-Type': 'application/json',
-        'Accept': 'audio/mpeg',
       },
       body: JSON.stringify({
-        model_id: CARTESIA_MODEL_ID,
-        transcript: buildLocalSpokenTranscript(cleanText, tuning),
-        voice: {
-          mode: 'id',
-          id: voiceId,
-        },
-        language: 'en',
-        output_format: {
-          container: 'mp3',
-          bit_rate: 128000,
-          sample_rate: 44100,
-        },
-        generation_config: {
-          speed: tuning.speed,
-          volume: tuning.volume,
-          emotion: tuning.emotion,
+        text: cleanText,
+        model_id: ELEVENLABS_MODEL,
+        voice_settings: {
+          stability: 0.72,
+          similarity_boost: 0.88,
+          speed: 0.92,
+          style: 0.4,
         },
       }),
     });
 
-  try {
-    console.log(`[Speech] Calling Cartesia model=${CARTESIA_MODEL_ID} voice=${voiceId} speed=${tuning.speed} ssmlSpeed=${tuning.ssmlSpeed} emotion=${tuning.emotion} text="${cleanText.substring(0, 60)}..."`);
-    const response = await callCartesia();
-
     if (!response.ok) {
       const body = await response.text();
-      console.error(`[Speech] Cartesia failed: HTTP ${response.status} — ${body.substring(0, 500)}`);
+      console.error(`[Speech] ElevenLabs failed: HTTP ${response.status} — ${body.substring(0, 500)}`);
       return res.status(response.status).json({
-        error: `Cartesia TTS failed (${response.status})`,
+        error: `ElevenLabs TTS failed (${response.status})`,
         details: body,
       });
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'audio/mpeg');
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', buffer.length);
     return res.send(buffer);
   } catch (error: any) {
-    console.error('[Speech] Cartesia request failed:', error?.message || error);
-    res.status(500).json({ error: error?.message || 'Cartesia speech generation failed' });
+    console.error('[Speech] ElevenLabs request failed:', error?.message || error);
+    res.status(500).json({ error: error?.message || 'ElevenLabs speech generation failed' });
   }
 });
 
@@ -792,8 +696,8 @@ async function startServer() {
       console.log(`💳 Stripe: ${getStripe() ? "✅ Configured" : "❌ Missing STRIPE_SECRET_KEY"}`);
       console.log(`🗄️ Supabase: ${supabase ? "✅ Configured" : "❌ Missing SUPABASE_URL/SERVICE_ROLE_KEY"}`);
       console.log(`🤖 OpenAI: ${process.env.OPENAI_API_KEY ? "✅ Configured" : "❌ Missing OPENAI_API_KEY"}`);
-      console.log(`🎙️ Cartesia TTS: ${process.env.CARTESIA_API_KEY ? "✅ Configured" : "❌ Missing CARTESIA_API_KEY"}`);
-      console.log(`🗣️ David Voice: ${resolveCartesiaVoiceId(process.env.CARTESIA_VOICE_ID)} (Cartesia)`);
+      console.log(`🎙️ ElevenLabs TTS: ${process.env.ELEVENLABS_API_KEY ? "✅ Configured" : "❌ Missing ELEVENLABS_API_KEY"}`);
+      console.log(`🗣️ David Voice: ${process.env.ELEVENLABS_VOICE_ID || "not set"} (ElevenLabs)`);
       console.log("--------------------------\n");
     });
   }
