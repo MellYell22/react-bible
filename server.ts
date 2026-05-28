@@ -582,7 +582,12 @@ app.post("/api/speech", async (req, res) => {
     return res.status(400).json({ error: 'Missing text parameter' });
   }
 
-  const cleanText = text.trim().replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  const cleanText = text.trim()
+    .replace(/<[^>]+>/g, '')      // strip HTML/SSML tags
+    .replace(/\.{2,}/g, '')       // remove ellipses — ElevenLabs inserts long pauses for these
+    .replace(/\s*—\s*/g, ', ')    // em-dash → comma keeps flow without a dead stop
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!cleanText) {
     return res.status(400).json({ error: 'Text was empty after stripping markup' });
   }
@@ -611,10 +616,11 @@ app.post("/api/speech", async (req, res) => {
         text: cleanText,
         model_id: ELEVENLABS_MODEL,
         voice_settings: {
-          stability: 0.72,
+          stability: 0.5,        // lower = more natural conversational variation
           similarity_boost: 0.88,
-          speed: 0.92,
-          style: 0.4,
+          speed: 1.0,            // natural pace — no artificial slowdown
+          style: 0.3,
+          use_speaker_boost: true,
         },
       }),
     });
