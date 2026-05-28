@@ -2,7 +2,7 @@ const ELEVENLABS_VOICE_ID = 'your-voice-id-here';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
-import { humanizeForTts } from './davidSpeechDelivery';
+import { humanizeForTts } from '../src/utils/davidSpeechDelivery';
 
 function cleanTranscript(text: string): string {
   return text

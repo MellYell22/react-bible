@@ -320,6 +320,8 @@ export default function VoiceScreen({ route, navigation }: any) {
     if (!isSessionGenerationActive(generation)) return;
 
     const playbackToken = ++playbackTokenRef.current;
+    const isGreetingPlaybackCurrent = () =>
+      isSessionGenerationActive(generation) && playbackTokenRef.current === playbackToken;
 
     isDavidSpeakingRef.current = true;
     setIsDavidSpeaking(true);
@@ -334,7 +336,10 @@ export default function VoiceScreen({ route, navigation }: any) {
       });
       const audioUrl = await Promise.race([ttsPromise, timeoutPromise]);
 
-      if (!isSessionGenerationActive(generation)) return;
+      if (!isGreetingPlaybackCurrent()) {
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        return;
+      }
 
       if (!audioUrl) {
         log('TTS timeout or failed — continuing without blocking');
@@ -352,7 +357,10 @@ export default function VoiceScreen({ route, navigation }: any) {
       audio.preload = 'auto';
 
       const finishGreeting = () => {
-        if (!isSessionGenerationActive(generation)) return;
+        if (!isGreetingPlaybackCurrent()) {
+          URL.revokeObjectURL(audioUrl);
+          return;
+        }
         log('TTS playback ended', 'greeting');
         isDavidSpeakingRef.current = false;
         setIsDavidSpeaking(false);
@@ -365,13 +373,20 @@ export default function VoiceScreen({ route, navigation }: any) {
 
       audio.onended = finishGreeting;
       audio.onerror = () => {
+        if (!isGreetingPlaybackCurrent()) return;
         log('TTS playback error — opening mic');
         finishGreeting();
       };
 
+      if (!isGreetingPlaybackCurrent()) {
+        URL.revokeObjectURL(audioUrl);
+        return;
+      }
+
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch((playErr: any) => {
+          if (!isGreetingPlaybackCurrent()) return;
           log('TTS play() rejected', playErr?.message);
           finishGreeting();
         });
@@ -588,7 +603,7 @@ export default function VoiceScreen({ route, navigation }: any) {
           // response is always better than a generic fallback.
           log('Banned therapy phrase on first exchange — allowing through', response.substring(0, 60));
         }
-      } else if (hasGreetedRef.current && looksLikeOpeningGreeting(response)) {
+      } else if (hasGreetedRef.current && hasHadRealExchange && looksLikeOpeningGreeting(response)) {
         const fallback = pickFallback();
         log('Duplicate opening greeting — swapping response', `"${response.substring(0, 60)}" → "${fallback}"`);
         addLog('Replaced duplicate opening greeting with fallback');
@@ -866,7 +881,14 @@ export default function VoiceScreen({ route, navigation }: any) {
     log('Requesting microphone permission');
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
       log('Microphone permission granted');
     } catch (err: any) {
       log('Microphone permission denied', err?.message);

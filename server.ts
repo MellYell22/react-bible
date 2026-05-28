@@ -54,6 +54,16 @@ const supabase = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
+function requireProPrice(priceId?: string | null) {
+  const proPriceId = process.env.STRIPE_PRICE_ID_PRO;
+  if (!proPriceId) {
+    throw new Error("STRIPE_PRICE_ID_PRO is not configured; refusing to grant paid entitlement");
+  }
+  if (priceId !== proPriceId) {
+    throw new Error(`Paid Stripe event used unrecognized priceId: ${priceId || "missing"}`);
+  }
+}
+
 app.use(express.json({
   verify: (req: any, res, buf) => {
     if (req.url?.startsWith('/api/stripe-webhook')) {
@@ -142,6 +152,17 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         const customerId = session.customer as string;
         const customerEmail = session.customer_details?.email || session.customer_email || null;
         const userIdMetadata = session.client_reference_id || session.metadata?.userId || session.metadata?.user_id;
+        const subscriptionId = session.subscription as string | null;
+        const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
+        const priceId = lineItems.data[0]?.price?.id;
+        requireProPrice(priceId);
+        if (session.payment_status !== "paid") {
+          throw new Error(`Checkout session ${session.id} completed without paid status: ${session.payment_status}`);
+        }
+        const subscription = subscriptionId ? await stripe.subscriptions.retrieve(subscriptionId) : null;
+        if (subscription && subscription.status !== "active" && subscription.status !== "trialing") {
+          throw new Error(`Checkout subscription ${subscription.id} is not active/trialing: ${subscription.status}`);
+        }
         
         console.log(`[Server Webhook] Processing session ${session.id} for user metadata: ${userIdMetadata}`);
 
@@ -149,22 +170,27 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         
         if (profile) {
           console.log(`[Server Webhook] Upgrading user ${profile.id} to Pro...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
+            stripe_subscription_id: subscriptionId,
             subscription_tier: 'pro',
             subscription_status: 'active',
             plan: 'pro',
-            stripe_subscription_status: 'active',
+            stripe_subscription_status: subscription?.status || 'active',
+            stripe_price_id: priceId,
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Server Webhook] UPDATE FAILED for user ${profile.id}: ${error.message}`);
+            throw error;
+          } else if (!data || data.length === 0) {
+            throw new Error(`Profile update for ${profile.id} affected 0 rows`);
           } else {
             console.log(`[Server Webhook] UPDATE SUCCESS: User ${profile.id} is now Pro.`);
           }
         } else {
-          console.error(`[Server Webhook] CRITICAL: Could not resolve profile for checkout session ${session.id}`);
+          throw new Error(`Could not resolve profile for checkout session ${session.id}`);
         }
         break;
       }
@@ -175,6 +201,9 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         const customerId = invoice.customer as string;
         const customerEmail = invoice.customer_email;
         const subscriptionId = invoice.subscription as string;
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const priceId = subscription.items.data[0]?.price?.id;
+        requireProPrice(priceId);
 
         console.log(`[Server Webhook] Processing invoice ${invoice.id} for customer ${customerId}`);
 
@@ -182,21 +211,27 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
 
         if (profile) {
           console.log(`[Server Webhook] Confirming Pro status for user ${profile.id}...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             subscription_tier: 'pro',
             subscription_status: 'active',
             plan: 'pro',
-            stripe_subscription_status: 'active',
+            stripe_subscription_status: subscription.status,
+            stripe_price_id: priceId,
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
           
           if (error) {
             console.error(`[Server Webhook] UPDATE FAILED for user ${profile.id} on invoice: ${error.message}`);
+            throw error;
+          } else if (!data || data.length === 0) {
+            throw new Error(`Invoice update for ${profile.id} affected 0 rows`);
           } else {
             console.log(`[Server Webhook] UPDATE SUCCESS: User ${profile.id} Pro status confirmed.`);
           }
+        } else {
+          throw new Error(`Could not resolve profile for invoice ${invoice.id}`);
         }
         break;
       }
@@ -207,6 +242,8 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         const customerId = subscription.customer as string;
         const userIdMetadata = subscription.metadata?.userId || subscription.metadata?.user_id;
         const status = subscription.status;
+        const priceId = subscription.items.data[0]?.price?.id;
+        requireProPrice(priceId);
         
         // Map any "paying" status to pro
         const isPro = status === 'active' || status === 'trialing';
@@ -218,21 +255,27 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
         
         if (profile) {
           console.log(`[Server Webhook] Syncing user ${profile.id} to tier ${tier}...`);
-          const { error } = await supabase.from('profiles').update({
+          const { data, error } = await supabase.from('profiles').update({
             stripe_customer_id: customerId,
             stripe_subscription_id: subscription.id,
             subscription_tier: tier,
             subscription_status: isPro ? 'active' : 'inactive',
             plan: tier,
             stripe_subscription_status: status,
+            stripe_price_id: priceId,
             updated_at: new Date().toISOString()
-          }).eq('id', profile.id);
+          }).eq('id', profile.id).select();
 
           if (error) {
             console.error(`[Server Webhook] SYNC FAILED for user ${profile.id}: ${error.message}`);
+            throw error;
+          } else if (!data || data.length === 0) {
+            throw new Error(`Subscription sync for ${profile.id} affected 0 rows`);
           } else {
             console.log(`[Server Webhook] SYNC SUCCESS: User ${profile.id} profile synchronized.`);
           }
+        } else {
+          throw new Error(`Could not resolve profile for subscription ${subscription.id}`);
         }
         break;
       }
@@ -520,7 +563,7 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
     const safeFilename = filename.includes('.') ? filename : `audio.${ext}`;
     const audioFile = new File([audioBuffer], safeFilename, { type: mimeType });
 
-    const MIN_AUDIO_BYTES = 5000;
+    const MIN_AUDIO_BYTES = 2200;
     const MIN_MEANINGFUL_WORDS = 2;
     const MIN_MEANINGFUL_LETTERS = 8;
     const junkPatterns = [
@@ -535,11 +578,22 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
       /^(breathing|inhales?|exhales?|sigh|sighs)[.!?\s]*$/i,
       /^\[.*\]$/,
     ];
+    const intentionalShortPhrases = [
+      /^(hi|hey|hello)\s+(david|there|man|bro|friend)/i,
+      /^(good\s+)?(morning|evening|afternoon)/i,
+      /^how('?s|\s+is)\s+(it|everything|life|things)/i,
+      /^i('?m|\s+am)\s+/i,
+      /^(i\s+need|i\s+feel|i\s+want|help|pray)/i,
+      /^what('?s|\s+is)\s+/i,
+      /^can\s+you/i,
+      /^david/i,
+    ];
 
     const isMeaningful = (text: string): boolean => {
       const t = text.trim();
       const n = t.toLowerCase();
       if (!t || n.length < 3) return false;
+      if (intentionalShortPhrases.some(re => re.test(t))) return true;
       if (junkPatterns.some(re => re.test(n)) || noisePatterns.some(re => re.test(n))) return false;
       const words = t.split(/\s+/).filter(Boolean);
       if (words.length < MIN_MEANINGFUL_WORDS) return false;

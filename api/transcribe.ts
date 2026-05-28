@@ -16,10 +16,27 @@ const NOISE_TRANSCRIPT_PATTERNS = [
 
 const MIN_MEANINGFUL_WORDS = 2;
 const MIN_MEANINGFUL_LETTERS = 8;
-const MIN_AUDIO_BYTES = 5000;
+const MIN_AUDIO_BYTES = 2200;
+
+const INTENTIONAL_SHORT_PHRASES = [
+  /^(hi|hey|hello)\s+(david|there|man|bro|friend)/i,
+  /^(good\s+)?(morning|evening|afternoon)/i,
+  /^how('?s|\s+is)\s+(it|everything|life|things)/i,
+  /^i('?m|\s+am)\s+/i,
+  /^(i\s+need|i\s+feel|i\s+want|help|pray)/i,
+  /^what('?s|\s+is)\s+/i,
+  /^can\s+you/i,
+  /^david/i,
+];
+
+function isIntentionalShortPhrase(text: string): boolean {
+  const normalized = text.trim();
+  return INTENTIONAL_SHORT_PHRASES.some(re => re.test(normalized));
+}
 
 function isJunkTranscript(normalized: string): boolean {
   if (!normalized || normalized.length < 3) return true;
+  if (isIntentionalShortPhrase(normalized)) return false;
   if (JUNK_TRANSCRIPT_PATTERNS.some(re => re.test(normalized))) return true;
   if (NOISE_TRANSCRIPT_PATTERNS.some(re => re.test(normalized))) return true;
   const words = normalized.split(/\s+/).filter(Boolean);
@@ -30,6 +47,7 @@ function isJunkTranscript(normalized: string): boolean {
 function isMeaningfulTranscript(transcript: string): boolean {
   const normalized = transcript.trim().toLowerCase().replace(/\s+/g, ' ');
   if (isJunkTranscript(normalized)) return false;
+  if (isIntentionalShortPhrase(transcript)) return true;
   const words = transcript.trim().split(/\s+/).filter(Boolean);
   if (words.length < MIN_MEANINGFUL_WORDS) return false;
   const letters = transcript.replace(/[^a-zA-Z]/g, '');
