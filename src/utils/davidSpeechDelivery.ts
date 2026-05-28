@@ -76,7 +76,7 @@ const softenPunctuationForTts = (text: string): string => {
   t = t.replace(/\.{4,}/g, '...');
   t = t.replace(/,{2,}/g, ',');
   t = t.replace(/\s+,/g, ',');
-  t = t.replace(/([.!?])(?=\S)/g, '$1 ');
+  t = t.replace(/([.!?])(?=[^\s.!?])/g, '$1 ');
 
   return restoreDecimalPoints(t);
 };

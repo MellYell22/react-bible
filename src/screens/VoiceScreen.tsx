@@ -18,9 +18,9 @@ import {
   normalizeTranscript,
 } from '../utils/voiceTranscript';
 import { getVoiceSessionGreeting, DAVID_ANTI_REPEAT_FALLBACKS } from '../constants/persona';
-import { humanizeForTts, preSpeechThinkingDelay, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
+import { humanizeForTts, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 
-const TTS_START_TIMEOUT_MS = 2500;
+const TTS_START_TIMEOUT_MS = 10000;
 const LLM_RESPONSE_TIMEOUT_MS = 20000;
 const TTS_RESPONSE_TIMEOUT_MS = 14000;
 const USER_CONTEXT_READY_TIMEOUT_MS = 1800;
@@ -598,7 +598,6 @@ export default function VoiceScreen({ route, navigation }: any) {
         log('Anti-repeat triggered — swapping response', `"${response.substring(0, 60)}" → "${fallback}"`);
         finalResponse = fallback;
       }
-      await waitForVoiceContextReady();
       if (!isVoiceTurnActive(voiceTurnId, generation)) {
         log('Prepared response ignored — newer voice turn is active');
         return;
@@ -656,12 +655,11 @@ export default function VoiceScreen({ route, navigation }: any) {
     log('TTS queued after sanitation', { displayChars: displayText.length, speechChars: speechText.length });
 
     try {
-      await preSpeechThinkingDelay(speechText);
       if (!isVoiceTurnActive(voiceTurnId, generation) || playbackTokenRef.current !== playbackToken) {
         log('TTS request skipped — voice turn no longer active');
         return;
       }
-      log('TTS request started after formatting complete', `${speechText.length} chars`);
+      log('TTS request started', `${speechText.length} chars`);
       addLog('Generating David’s voice…');
       const audioUrl = await withTimeout(
         generateSpeech(speechText, { skipHumanize: true, alreadyPrepared: true }),

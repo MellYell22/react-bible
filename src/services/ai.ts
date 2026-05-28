@@ -1,6 +1,5 @@
 import { MoodResponse, ResponseLength, Scripture } from "../types";
 import {
-  preSpeechThinkingDelay,
   prepareDavidTtsPayload,
   sanitizeForDavidSpeech,
 } from "../utils/davidSpeechDelivery";
@@ -239,11 +238,6 @@ export const generateSpeech = async (
   if (!speechText) return null;
 
   try {
-    const shouldDelay = options.withThinkingDelay ?? (!options.isGreeting && !options.alreadyPrepared);
-    if (shouldDelay) {
-      await preSpeechThinkingDelay(speechText);
-    }
-
     const response = await fetch('/api/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
