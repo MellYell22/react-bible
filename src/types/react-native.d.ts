@@ -10,6 +10,7 @@ declare module 'react-native' {
   export class RefreshControl extends React.Component<any> {}
   export class ScrollView extends React.Component<any> {
     scrollTo: (...args: any[]) => void;
+    scrollToEnd: (...args: any[]) => void;
     getInnerViewNode: () => any;
   }
   export class Text extends React.Component<any> {}
