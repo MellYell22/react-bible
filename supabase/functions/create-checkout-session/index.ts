@@ -93,6 +93,23 @@ serve(async (req) => {
       httpClient: Stripe.createFetchHttpClient(),
     });
 
+    const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO") || Deno.env.get("VITE_STRIPE_PRICE_ID_PRO");
+    if (!proPriceId) {
+      console.error("[create-checkout-session] CRITICAL: STRIPE_PRICE_ID_PRO is not configured.");
+      return new Response(
+        JSON.stringify({ error: "Server configuration error: Pro plan is unavailable." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (priceId !== proPriceId) {
+      console.error(`[create-checkout-session] Rejected unrecognized priceId: ${priceId}`);
+      return new Response(
+        JSON.stringify({ error: "Invalid checkout price." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Get origin for success/cancel URLs
     const origin = req.headers.get("origin") || Deno.env.get("APP_URL") || "http://localhost:3000";
     console.log(`[create-checkout-session] Creating session for user: ${userId}, price: ${priceId}, origin: ${origin}`);

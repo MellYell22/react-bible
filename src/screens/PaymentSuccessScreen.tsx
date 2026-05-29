@@ -8,6 +8,7 @@ import { FullScreenBackground } from '../components/FullScreenBackground';
 export default function PaymentSuccessScreen({ navigation }: { navigation: any }) {
   const { profile, refreshProfile } = useUser();
   const [isActivating, setIsActivating] = useState(true);
+  const [activationTimedOut, setActivationTimedOut] = useState(false);
   const [attempts, setAttempts] = useState(0);
 
   useEffect(() => {
@@ -20,6 +21,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
           console.warn('[PaymentSuccess] Polling timed out after 90 seconds.');
           clearInterval(interval);
           setIsActivating(false);
+          setActivationTimedOut(true);
           return next;
         }
         console.log(`[PaymentSuccess] Polling attempt ${next}...`);
@@ -37,9 +39,10 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
 
   useEffect(() => {
     console.log(`[PaymentSuccess] UI Check - Profile: ${profile?.id}, Tier: ${profile?.subscription_tier}, Status: ${profile?.stripe_subscription_status}`);
-    if (profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'owner' || (profile as any)?.subscription_status === 'active') {
+    if (profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'owner') {
       console.log('[PaymentSuccess] PRO STATUS DETECTED! Unlocking app features.');
       setIsActivating(false);
+      setActivationTimedOut(false);
       
       // Auto-redirect after a small delay to let user see success
       const timeout = setTimeout(() => {
@@ -49,12 +52,23 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
     }
   }, [profile?.subscription_tier]);
 
+  const navigateTo = (name: string) => {
+    if (navigation?.reset) {
+      navigation.reset({
+        index: 0,
+        routes: [{ name }],
+      });
+      return;
+    }
+    navigation?.navigate?.(name);
+  };
+
   const handleContinue = () => {
-    // Redirect to main app entry (Mood)
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Mood' }],
-    });
+    navigateTo('Mood');
+  };
+
+  const handleProfile = () => {
+    navigateTo('Profile');
   };
 
   return (
@@ -68,7 +82,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
         >
           <View style={styles.iconContainer}>
             <AnimatePresence mode="wait">
-              {isActivating ? (
+              {isActivating || activationTimedOut ? (
                 <motion.div
                   key="loading"
                   initial={{ opacity: 0 }}
@@ -77,7 +91,9 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
                   style={styles.flexCenter}
                 >
                   <ActivityIndicator size="large" color="#d4af37" />
-                  <Text style={styles.pollingText}>Finalizing your upgrade...</Text>
+                  <Text style={styles.pollingText}>
+                    {activationTimedOut ? 'Waiting for Stripe confirmation...' : 'Finalizing your upgrade...'}
+                  </Text>
                 </motion.div>
               ) : (
                 <motion.div
@@ -93,16 +109,22 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
           </View>
 
           <Text style={styles.title}>
-            {isActivating ? 'HEAVENLY SYNC IN PROGRESS' : 'GLORY! YOU ARE PRO'}
+            {isActivating
+              ? 'HEAVENLY SYNC IN PROGRESS'
+              : activationTimedOut
+                ? 'UPGRADE STILL FINALIZING'
+                : 'GLORY! YOU ARE PRO'}
           </Text>
 
           <Text style={styles.description}>
-            {isActivating 
+            {isActivating
               ? 'Our systems are receiving the confirmation from Stripe. Your account will be transformed into Pro momentarily...'
+              : activationTimedOut
+                ? 'Stripe has not confirmed Pro access on your profile yet. Please check your Profile again in a moment.'
               : 'Your transformation is complete. You now have unlimited access to AI insights and deeper scripture reflections.'}
           </Text>
 
-          {!isActivating && (
+          {!isActivating && !activationTimedOut && (
             <TouchableOpacity 
               style={styles.button} 
               onPress={handleContinue}
@@ -113,10 +135,10 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
             </TouchableOpacity>
           )}
 
-          {isActivating && attempts > 10 && (
+          {((isActivating && attempts > 10) || activationTimedOut) && (
             <TouchableOpacity 
               style={styles.troubleButton} 
-              onPress={handleContinue}
+              onPress={handleProfile}
             >
               <Text style={styles.troubleText}>Taking too long? Go to Profile</Text>
             </TouchableOpacity>

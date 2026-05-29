@@ -13,6 +13,7 @@ import {
   isJunkTranscript,
   isMeaningfulTranscript,
   isDuplicateTranscript,
+  transcriptsAreSimilar,
   looksLikeOpeningGreeting,
   looksLikeBannedTherapyPhrase,
   normalizeTranscript,
@@ -138,11 +139,11 @@ export default function VoiceScreen({ route, navigation }: any) {
   const SPEECH_RMS_THRESHOLD = 0.016;
   const SILENCE_RMS_THRESHOLD = 0.006;
   const SILENCE_DURATION_MS = 925;
-  const MIN_SPEECH_MS = 360;
-  const MIN_SUSTAINED_SPEECH_FRAMES = 3;
+  const MIN_SPEECH_MS = 480;
+  const MIN_SUSTAINED_SPEECH_FRAMES = 4;
   const MIN_RECORDING_MS = 650;
   const MIN_AUDIO_BYTES = 2200;
-  const POST_TTS_MIC_DELAY_MS = 520;
+  const POST_TTS_MIC_DELAY_MS = 900;
   const MIC_RESTART_BASE_MS = 250;
   const MIC_RESTART_MAX_MS = 1600;
   const NO_SPEECH_DISCARD_MS = 15000;
@@ -334,7 +335,10 @@ export default function VoiceScreen({ route, navigation }: any) {
       });
       const audioUrl = await Promise.race([ttsPromise, timeoutPromise]);
 
-      if (!isSessionGenerationActive(generation)) return;
+      if (!isSessionGenerationActive(generation) || playbackTokenRef.current !== playbackToken) {
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        return;
+      }
 
       if (!audioUrl) {
         log('TTS timeout or failed — continuing without blocking');
@@ -352,7 +356,10 @@ export default function VoiceScreen({ route, navigation }: any) {
       audio.preload = 'auto';
 
       const finishGreeting = () => {
-        if (!isSessionGenerationActive(generation)) return;
+        if (!isSessionGenerationActive(generation) || playbackTokenRef.current !== playbackToken) {
+          URL.revokeObjectURL(audioUrl);
+          return;
+        }
         log('TTS playback ended', 'greeting');
         isDavidSpeakingRef.current = false;
         setIsDavidSpeaking(false);
@@ -439,6 +446,7 @@ export default function VoiceScreen({ route, navigation }: any) {
     addLog(`David: ${greeting}`);
     setMessages([{ role: 'assistant', content: greeting }]);
     setLastResponseText(greeting);
+    lastDavidResponseRef.current = greeting;
 
     void playOpeningGreeting(greeting, generation);
   };
@@ -588,7 +596,7 @@ export default function VoiceScreen({ route, navigation }: any) {
           // response is always better than a generic fallback.
           log('Banned therapy phrase on first exchange — allowing through', response.substring(0, 60));
         }
-      } else if (hasGreetedRef.current && looksLikeOpeningGreeting(response)) {
+      } else if (hasHadRealExchange && hasGreetedRef.current && looksLikeOpeningGreeting(response)) {
         const fallback = pickFallback();
         log('Duplicate opening greeting — swapping response', `"${response.substring(0, 60)}" → "${fallback}"`);
         addLog('Replaced duplicate opening greeting with fallback');
@@ -866,7 +874,14 @@ export default function VoiceScreen({ route, navigation }: any) {
     log('Requesting microphone permission');
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+        },
+        video: false,
+      });
       log('Microphone permission granted');
     } catch (err: any) {
       log('Microphone permission denied', err?.message);
@@ -1103,6 +1118,14 @@ export default function VoiceScreen({ route, navigation }: any) {
         }
 
         const normalized = normalizeTranscript(transcript);
+        const lastDavidResponse = normalizeTranscript(lastDavidResponseRef.current);
+        if (lastDavidResponse && transcriptsAreSimilar(lastDavidResponse, normalized)) {
+          emptyTranscriptStreakRef.current += 1;
+          addLog('Transcript rejected as David self-echo');
+          scheduleListenRetry('Assistant echo');
+          return;
+        }
+
         if (isDuplicateTranscript(normalized, lastTranscriptRef.current, recentTranscriptsRef.current)) {
           emptyTranscriptStreakRef.current += 1;
           addLog('Duplicate transcript from Whisper');
