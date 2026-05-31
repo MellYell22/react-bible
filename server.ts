@@ -294,16 +294,23 @@ app.get("/api/health", (req, res) => {
 
 // OpenAI API Endpoints
 app.post("/api/chat", async (req, res) => {
-  const { messages, stream = false, mood, moodKey, detectedMood, profile, voiceContext } = req.body;
-  const openaiApiKey = getOpenAIApiKey();
-  
-  if (!openaiApiKey) {
-    return res.status(500).json({ error: "OpenAI API Key is not configured." });
-  }
-
-  console.log("OPENAI REQUEST SENT - Chat");
-
   try {
+    const { messages, stream = false, mood, moodKey, detectedMood, profile, voiceContext } = req.body || {};
+    const openaiApiKey = getOpenAIApiKey();
+
+    if (!openaiApiKey) {
+      return res.status(500).json({
+        error: `${OPENAI_API_KEY_ENV_NAME} is not configured on the server.`,
+        envName: OPENAI_API_KEY_ENV_NAME,
+      });
+    }
+
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: 'Missing or invalid messages array' });
+    }
+
+    console.log("OPENAI REQUEST SENT - Chat");
+
     const openaiClient = new OpenAI({ apiKey: openaiApiKey });
     const resolvedMoodKey = resolveMoodKey({
       mood,
@@ -352,17 +359,18 @@ app.post("/api/chat", async (req, res) => {
         frequency_penalty: 0.45,
         max_tokens: 90,
       });
-      const text = completion.choices[0].message.content || '';
+      const text = completion.choices[0]?.message?.content || '';
       console.log(`[Chat] Response (${text.length} chars): ${text.substring(0, 80)}…`);
       res.json({ text });
     }
   } catch (error: any) {
     logOpenAIError('Chat', error);
-    res.status(getPublicOpenAIHttpStatus(error)).json({
-      error: 'Failed to get response from AI',
-      details: getPublicOpenAIErrorMessage(error),
-      envName: OPENAI_API_KEY_ENV_NAME,
-    });
+    if (!res.headersSent) {
+      res.status(getPublicOpenAIHttpStatus(error)).json({
+        error: getPublicOpenAIErrorMessage(error),
+        envName: OPENAI_API_KEY_ENV_NAME,
+      });
+    }
   }
 });
 
