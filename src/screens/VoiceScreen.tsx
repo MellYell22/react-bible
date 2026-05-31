@@ -144,24 +144,34 @@ export default function VoiceScreen() {
         return;
       }
 
-      const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio;
-      audio.preload = 'auto';
+      await new Promise<void>((resolve, reject) => {
+        const audio = new Audio(audioUrl);
+        currentAudioRef.current = audio;
+        audio.preload = 'auto';
+        let finished = false;
 
-      const finish = () => {
-        if (!mountedRef.current) return;
-        currentAudioRef.current = null;
-        try {
-          URL.revokeObjectURL(audioUrl);
-        } catch {
-          // Ignore revoke errors.
-        }
-        setPhase('ready');
-      };
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          if (!mountedRef.current) {
+            resolve();
+            return;
+          }
 
-      audio.onended = finish;
-      audio.onerror = finish;
-      await audio.play();
+          currentAudioRef.current = null;
+          try {
+            URL.revokeObjectURL(audioUrl);
+          } catch {
+            // Ignore revoke errors.
+          }
+          setPhase('ready');
+          resolve();
+        };
+
+        audio.onended = finish;
+        audio.onerror = finish;
+        audio.play().catch(reject);
+      });
     } catch (err: any) {
       if (!mountedRef.current) return;
       setError(err?.message || 'David had trouble speaking that response.');
