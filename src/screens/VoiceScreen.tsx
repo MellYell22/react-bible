@@ -223,7 +223,14 @@ export default function VoiceScreen() {
         };
 
         audio.onended = finish;
-        audio.onerror = finish;
+        audio.onerror = () => {
+          try {
+            URL.revokeObjectURL(audioUrl);
+          } catch {
+            // Ignore revoke errors.
+          }
+          reject(new Error("David's voice audio was returned, but the browser could not play it."));
+        };
         audio.play().catch(reject);
       });
     } catch (err: any) {

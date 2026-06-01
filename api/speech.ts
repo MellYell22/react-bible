@@ -1,6 +1,7 @@
 const DAVID_ELEVENLABS_VOICE_ID = 'ewxUvnyvvOehYjKjUVKC';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_v3';
+const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_44100_128';
 
 import { humanizeForTts } from '../src/utils/davidSpeechDelivery';
 
@@ -37,11 +38,13 @@ export default async function handler(req: any, res: any) {
   const voiceId = process.env.ELEVENLABS_VOICE_ID || DAVID_ELEVENLABS_VOICE_ID;
 
   try {
-    const response = await fetch(`${ELEVENLABS_TTS_URL}/${voiceId}`, {
+    const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`;
+    const response = await fetch(speechUrl, {
       method: 'POST',
       headers: {
         'xi-api-key': apiKey,
         'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg',
       },
       body: JSON.stringify({
         text: cleanText,

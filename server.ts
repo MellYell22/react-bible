@@ -17,6 +17,7 @@ import { DAVID_PERSONALITY_PROMPT, DAVID_CHAT_TEMPERATURE } from './src/constant
 import { buildDavidScriptureGuidance, buildDavidSystemPromptFromGuidance, resolveMoodKey } from './src/utils/davidMoodContext';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_v3';
+const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_44100_128';
 const DAVID_ELEVENLABS_VOICE_ID = 'ewxUvnyvvOehYjKjUVKC';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -630,11 +631,13 @@ app.post("/api/speech", async (req, res) => {
 
   try {
     console.log(`[Speech] Calling ElevenLabs model=${ELEVENLABS_MODEL} voice=${voiceId} text="${cleanText.substring(0, 60)}..."`);
-    const response = await fetch(`${ELEVENLABS_TTS_URL}/${voiceId}`, {
+    const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`;
+    const response = await fetch(speechUrl, {
       method: 'POST',
       headers: {
         'xi-api-key': apiKey,
         'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg',
       },
       body: JSON.stringify({
         text: cleanText,

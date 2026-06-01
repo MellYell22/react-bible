@@ -284,22 +284,30 @@ export const generateSpeech = async (
 
   if (!speechText) return null;
 
-  try {
-    const response = await fetch('/api/speech', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: speechText,
-      }),
-    });
+  const response = await fetch('/api/speech', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: speechText,
+    }),
+  });
 
-    if (!response.ok) return null;
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    const details = `${error.details || error.error || ''}`;
 
-    const blob = await response.blob();
-    return URL.createObjectURL(blob);
-  } catch (error) {
-    console.error("Speech generation error:", error);
-    return null;
+    if (response.status === 401 || details.toLowerCase().includes('invalid_api_key')) {
+      throw new Error('ElevenLabs rejected the current API key. David can respond in text, but voice audio cannot be generated yet.');
+    }
+
+    throw new Error(error.error || `David's voice audio could not be generated (${response.status}).`);
   }
+
+  const blob = await response.blob();
+  if (!blob.size) {
+    throw new Error("David's voice audio came back empty.");
+  }
+
+  return URL.createObjectURL(blob);
 };
 
