@@ -4,7 +4,7 @@ import { Analytics } from '@vercel/analytics/react';
 
 export default function App() {
   const openEmail = () => {
-    Linking.openURL('mailto:aadesigns87@gmail.com?subject=Living%20Labs%20Waitlist');
+    Linking.openURL('mailto:aadesigns87@gmail.com?subject=Bible%20Mood%20Search%20Waitlist');
   };
 
   return (
@@ -19,10 +19,10 @@ export default function App() {
           <Text style={styles.badgeText}>COMING SOON</Text>
         </View>
 
-        <Text style={styles.title}>Living Labs</Text>
+        <Text style={styles.title}>Bible Mood Search</Text>
 
         <Text style={styles.subtitle}>
-          A faith-centered AI companion built to help you reflect, pray, journal, and grow with more peace and clarity.
+          A faith-centered AI companion built to help you find Bible verses, reflection prompts, and encouragement based on your mood.
         </Text>
 
         <View style={styles.divider} />
