@@ -12,8 +12,6 @@ export type HumanizeOptions = {
 
 const TRAILING_PAUSE_MARKS = /[\s,;:-]+$/;
 
-const SOFT_FILLER_RE =
-  /^(mm+|hmm+|hm+|yeah|hey|okay|alright|you know|i mean|well)[,.\.\s]+/i;
+const SOFT_FILLER_RE = /^(mm+|hmm+|hm+|yeah|hey|okay|alright|you know|i mean|well)[,.\s]+/i;
 
-const SCRIPTED_MARKUP_RE =
-  /\[(?:soft\
+const SCRIPTED_MARKUP_RE = /\[(?:
