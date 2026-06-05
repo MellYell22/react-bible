@@ -11,7 +11,6 @@ export type HumanizeOptions = {
 };
 
 const TRAILING_PAUSE_MARKS = /[\s,;:-]+$/;
-
 const SOFT_FILLER_RE = /^(mm+|hmm+|hm+|yeah|hey|okay|alright|you know|i mean|well)[,.\s]+/i;
+const DECIMAL_PLACEHOLDER = '__DAVID_DECIMAL_POINT__';
 
-const SCRIPTED_MARKUP_RE = /\[(?:
