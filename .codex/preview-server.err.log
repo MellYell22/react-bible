@@ -1,0 +1,21 @@
+C:\Users\Alissa\OneDrive\Apps\Scripture-By-Mood-main\Scripture-By-Mood-main\node_modules\@supabase\realtime-js\dist\main\lib\websocket-factory.js:103
+        throw new Error(errorMessage);
+              ^
+
+Error: Node.js 20 detected without native WebSocket support.
+
+Suggested solution: For Node.js < 22, install "ws" package and provide it via the transport option:
+import ws from "ws"
+new RealtimeClient(url, { transport: ws })
+    at WebSocketFactory.getWebSocketConstructor (C:\Users\Alissa\OneDrive\Apps\Scripture-By-Mood-main\Scripture-By-Mood-main\node_modules\@supabase\realtime-js\dist\main\lib\websocket-factory.js:103:15)
+    at RealtimeClient._initializeOptions (C:\Users\Alissa\OneDrive\Apps\Scripture-By-Mood-main\Scripture-By-Mood-main\node_modules\@supabase\realtime-js\dist\main\RealtimeClient.js:642:164)
+    at new RealtimeClient (C:\Users\Alissa\OneDrive\Apps\Scripture-By-Mood-main\Scripture-By-Mood-main\node_modules\@supabase\realtime-js\dist\main\RealtimeClient.js:185:43)
+    at SupabaseClient._initRealtimeClient (file:///C:/Users/Alissa/OneDrive/Apps/Scripture-By-Mood-main/Scripture-By-Mood-main/node_modules/@supabase/supabase-js/dist/index.mjs:839:10)
+    at new SupabaseClient (file:///C:/Users/Alissa/OneDrive/Apps/Scripture-By-Mood-main/Scripture-By-Mood-main/node_modules/@supabase/supabase-js/dist/index.mjs:674:24)
+    at createClient (file:///C:/Users/Alissa/OneDrive/Apps/Scripture-By-Mood-main/Scripture-By-Mood-main/node_modules/@supabase/supabase-js/dist/index.mjs:872:9)
+    at file:///C:/Users/Alissa/OneDrive/Apps/Scripture-By-Mood-main/Scripture-By-Mood-main/dist/server.js:11958:52
+    at ModuleJob.run (node:internal/modules/esm/module_job:234:25)
+    at async ModuleLoader.import (node:internal/modules/esm/loader:473:24)
+    at async importModuleDynamicallyWrapper (node:internal/vm/module:431:15)
+
+Node.js v20.17.0

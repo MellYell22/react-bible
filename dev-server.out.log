@@ -9,8 +9,8 @@
 💳 Stripe: ❌ Missing STRIPE_SECRET_KEY
 🗄️ Supabase: ❌ Missing SUPABASE_URL/SERVICE_ROLE_KEY
 🤖 OpenAI: ✅ Configured
-🎙️ Cartesia TTS: ❌ Missing CARTESIA_API_KEY
-🗣️ David Voice: a5136bf9-224c-4d76-b823-52bd5efcffcc (Cartesia)
+🎙️ ElevenLabs TTS: ❌ Missing ELEVENLABS_API_KEY
+🗣️ David Voice: ewxUvnyvvOehYjKjUVKC (ElevenLabs)
 --------------------------
 
 [Server] GET /

@@ -22,3 +22,6 @@ Thumbs.db
 npm-debug.log*
 pnpm-debug.log*
 .env*.local
+
+.vercel
+.env*.local

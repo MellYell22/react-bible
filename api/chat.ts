@@ -149,12 +149,16 @@ export default async function handler(req: any, res: any) {
     console.log('[Chat API] Returning David fallback response after OpenAI failure.');
 
     if (stream) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.write(`data: ${JSON.stringify({ text: fallbackText })}\n\n`);
-      res.write('data: [DONE]\n\n');
-      res.end();
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+      }
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ text: fallbackText })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      }
       return;
     }
 

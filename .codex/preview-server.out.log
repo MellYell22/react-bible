@@ -1,0 +1,19 @@
+◇ injected env (12) from .env.local // tip: ⌘ suppress logs { quiet: true }
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+◇ injected env (12) from .env.local // tip: ⌘ override existing { override: true }
+◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+
+🚀 Server running on http://localhost:3000
+🌍 NODE_ENV: production
+🔗 APP_URL: not set (defaulting to localhost:3000)
+
+--- Integration Status ---
+💳 Stripe: ✅ Configured
+🗄️ Supabase: ✅ Configured
+🤖 OpenAI: ❌ Missing OPENAI_API_KEY
+🎙️ ElevenLabs TTS: ❌ Missing ELEVENLABS_API_KEY
+🗣️ David Voice: ewxUvnyvvOehYjKjUVKC (ElevenLabs)
+--------------------------
+
+[Server] GET /api/health
+[Server] GET /api/health
