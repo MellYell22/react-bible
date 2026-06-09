@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
-import { Send, Mic, ThumbsUp, ThumbsDown, Volume2, Square } from 'lucide-react';
+import { Send, PhoneCall, ThumbsUp, ThumbsDown, Volume2, Square } from 'lucide-react';
 import { getChatResponseStream, generateSpeech, ChatHistoryMessage } from '../services/ai';
 import { ChatMessage } from '../types';
 import { saveAIFeedback } from '../services/supabase';
@@ -188,11 +188,12 @@ export default function ChatScreen({ navigation, route }: any) {
         </View>
         <Text style={styles.headerSubtitle}>AI Spiritual Companion</Text>
         <TouchableOpacity
-          style={styles.voiceSwitchButton}
+          style={styles.headerCallButton}
           onPress={() => navigation.navigate('Voice')}
+          accessibilityRole="button"
+          accessibilityLabel="Start voice call with David"
         >
-          <Mic color="#0b1e3d" size={16} />
-          <Text style={styles.voiceSwitchText}>TALK TO DAVID</Text>
+          <PhoneCall color="#ffffff" size={16} />
         </TouchableOpacity>
       </View>
 
@@ -293,6 +294,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(212, 175, 55, 0.1)',
+    position: 'relative',
   },
   headerTitle: {
     fontSize: 18,
@@ -313,26 +315,23 @@ const styles = StyleSheet.create({
     marginTop: 2,
     opacity: 0.8,
   },
-  voiceSwitchButton: {
-    flexDirection: 'row',
+  headerCallButton: {
+    position: 'absolute',
+    top: 34,
+    right: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 18,
-    backgroundColor: '#d4af37',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: '#16a34a',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
-  },
-  voiceSwitchText: {
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: '#0b1e3d',
-    marginLeft: 6,
-    letterSpacing: 0.8,
   },
   chatContainer: {
     flex: 1,

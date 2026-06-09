@@ -670,8 +670,12 @@ app.post("/api/speech", async (req, res) => {
 
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
-    console.error('[Speech] ELEVENLABS_API_KEY is not configured');
-    return res.status(500).json({ error: 'ElevenLabs API key not configured. Add ELEVENLABS_API_KEY to environment.' });
+    console.warn('[Speech] ELEVENLABS_API_KEY is not configured; returning text-only voice fallback');
+    return res.status(503).json({
+      code: 'voice_not_configured',
+      error: 'David voice audio is not configured yet.',
+      message: 'Add ELEVENLABS_API_KEY to the server environment to enable spoken audio.',
+    });
   }
 
   const voiceId = process.env.ELEVENLABS_VOICE_ID || DAVID_ELEVENLABS_VOICE_ID;

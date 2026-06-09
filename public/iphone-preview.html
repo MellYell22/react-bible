@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bible Mood Search iPhone Preview</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #111827;
+        --muted: #6b7280;
+        --gold: #d4af37;
+        --frame: #0b1020;
+        --bg: #f6f4ef;
+        --panel: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 20% 16%, rgba(212, 175, 55, 0.18), transparent 28%),
+          linear-gradient(135deg, #fbfaf7 0%, var(--bg) 46%, #ece7dc 100%);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      .preview-shell {
+        display: grid;
+        grid-template-columns: minmax(260px, 320px) minmax(390px, 430px);
+        align-items: center;
+        justify-content: center;
+        gap: 36px;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      .summary {
+        max-width: 320px;
+      }
+
+      .eyebrow {
+        margin: 0 0 12px;
+        color: #9a7620;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 1.8px;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 32px;
+        line-height: 1.05;
+      }
+
+      .summary p {
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.55;
+      }
+
+      .device-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .device {
+        position: relative;
+        width: min(390px, calc(100vw - 32px));
+        aspect-ratio: 390 / 844;
+        padding: 14px;
+        border-radius: 48px;
+        background: var(--frame);
+        box-shadow:
+          0 32px 80px rgba(17, 24, 39, 0.28),
+          0 12px 32px rgba(17, 24, 39, 0.18),
+          inset 0 0 0 2px rgba(255, 255, 255, 0.08);
+      }
+
+      .speaker {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        z-index: 2;
+        width: 96px;
+        height: 24px;
+        transform: translateX(-50%);
+        border-radius: 0 0 18px 18px;
+        background: #050914;
+      }
+
+      .screen {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        border: 1px solid rgba(212, 175, 55, 0.35);
+        border-radius: 36px;
+        background: #071326;
+      }
+
+      iframe {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #071326;
+      }
+
+      @media (max-width: 820px) {
+        body {
+          overflow: auto;
+        }
+
+        .preview-shell {
+          grid-template-columns: 1fr;
+          gap: 20px;
+          padding: 18px;
+        }
+
+        .summary {
+          display: none;
+        }
+
+        .device {
+          width: min(390px, calc(100vw - 24px));
+        }
+      }
+
+      @media (max-height: 900px) and (min-width: 821px) {
+        .device {
+          width: min(390px, calc((100vh - 48px) * 390 / 844));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="preview-shell" aria-label="iPhone simulator preview">
+      <section class="summary" aria-hidden="true">
+        <p class="eyebrow">Live workspace preview</p>
+        <h1>iPhone light simulator</h1>
+        <p>
+          The frame is loading the running local app at mobile dimensions, so taps,
+          forms, navigation, and API calls stay connected to localhost.
+        </p>
+      </section>
+
+      <section class="device-wrap">
+        <div class="device">
+          <div class="speaker"></div>
+          <div class="screen">
+            <iframe
+              src="/"
+              title="Bible Mood Search live app preview"
+              allow="microphone; autoplay"
+            ></iframe>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -9,21 +9,22 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Lock, Mic, Send, Sparkles, Volume2 } from 'lucide-react';
+import { Lock, PhoneCall, PhoneOff, Send, Sparkles } from 'lucide-react';
 
-import { generateSpeech, getDavidVoiceResponse } from '../services/ai';
+import { generateSpeech, getDavidVoiceResponse, transcribeAudio } from '../services/ai';
 import { useUser } from '../UserContext';
 import { hasProAccess, OWNER_EMAIL } from '../utils/tier';
 import { humanizeForTts, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 import { detectMoodKeyFromMessages } from '../utils/davidMoodContext';
 
-const DAVID_GREETING_AUDIO_URL = '/audio/david-greeting.mp3';
+const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
 
 type ScreenPhase =
   | 'checking'
-  | 'greeting'
-  | 'tapToBegin'
   | 'ready'
+  | 'ended'
+  | 'listening'
+  | 'transcribing'
   | 'thinking'
   | 'speaking'
   | 'error';
@@ -94,9 +95,18 @@ export default function VoiceScreen() {
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [lastResponseText, setLastResponseText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [voiceLevels, setVoiceLevels] = useState<number[]>(IDLE_VOICE_LEVELS);
 
-  const greetingStartedRef = useRef(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const discardRecordingRef = useRef(false);
+  const recordingMimeTypeRef = useRef('audio/webm');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const voiceActivityFrameRef = useRef<number | null>(null);
+  const voiceLevelsRef = useRef<number[]>(IDLE_VOICE_LEVELS);
   const mountedRef = useRef(true);
 
   const hasVoiceAccess = useMemo(() => {
@@ -109,6 +119,8 @@ export default function VoiceScreen() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      stopListening(true);
+      stopVoiceActivity();
       stopCurrentAudio();
     };
   }, []);
@@ -116,10 +128,8 @@ export default function VoiceScreen() {
   useEffect(() => {
     if (userContextLoading) return;
     if (!hasVoiceAccess) return;
-    if (greetingStartedRef.current) return;
 
-    greetingStartedRef.current = true;
-    void playGreetingAudio();
+    setPhase(currentPhase => currentPhase === 'checking' ? 'ready' : currentPhase);
   }, [hasVoiceAccess, userContextLoading]);
 
   const stopCurrentAudio = () => {
@@ -135,44 +145,227 @@ export default function VoiceScreen() {
     }
   };
 
-  const playGreetingAudio = async () => {
+  const stopVoiceActivity = () => {
+    if (voiceActivityFrameRef.current !== null) {
+      cancelAnimationFrame(voiceActivityFrameRef.current);
+      voiceActivityFrameRef.current = null;
+    }
+
+    try {
+      audioContextRef.current?.close();
+    } catch {
+      // Ignore audio context cleanup errors.
+    }
+
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    voiceLevelsRef.current = IDLE_VOICE_LEVELS;
+    setVoiceLevels(IDLE_VOICE_LEVELS);
+  };
+
+  const startVoiceActivity = (stream: MediaStream) => {
+    stopVoiceActivity();
+
+    try {
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+      if (!AudioContextCtor) return;
+
+      const audioContext = new AudioContextCtor();
+      const analyser = audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(stream);
+
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.78;
+      const timeData = new Uint8Array(analyser.fftSize);
+      source.connect(analyser);
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+
+      const tick = () => {
+        if (!analyserRef.current || !mountedRef.current) return;
+
+        analyserRef.current.getByteTimeDomainData(timeData);
+
+        let sumSquares = 0;
+        for (let index = 0; index < timeData.length; index += 1) {
+          const centered = (timeData[index] - 128) / 128;
+          sumSquares += centered * centered;
+        }
+
+        const rms = Math.sqrt(sumSquares / timeData.length);
+        const normalizedVolume = Math.max(0, Math.min(1, (rms - 0.012) / 0.18));
+        const now = performance.now();
+
+        const nextLevels = IDLE_VOICE_LEVELS.map((idleLevel, index) => {
+          const movement =
+            0.5 +
+            Math.abs(Math.sin(now / 175 + index * 0.82)) * 0.34 +
+            Math.abs(Math.cos(now / 260 + index * 0.53)) * 0.16;
+          const target = Math.max(0.12, Math.min(1, idleLevel + normalizedVolume * movement));
+          const previous = voiceLevelsRef.current[index] || idleLevel;
+          const smoothing = normalizedVolume > 0.04 ? 0.36 : 0.12;
+
+          return previous + (target - previous) * smoothing;
+        });
+
+        voiceLevelsRef.current = nextLevels;
+        setVoiceLevels(nextLevels);
+        voiceActivityFrameRef.current = requestAnimationFrame(tick);
+      };
+
+      tick();
+    } catch {
+      voiceLevelsRef.current = IDLE_VOICE_LEVELS;
+      setVoiceLevels(IDLE_VOICE_LEVELS);
+    }
+  };
+
+  const stopListening = (discard = false) => {
+    const recorder = mediaRecorderRef.current;
+
+    if (recorder && recorder.state !== 'inactive') {
+      discardRecordingRef.current = discard;
+      if (discard) audioChunksRef.current = [];
+      stopVoiceActivity();
+      recorder.stop();
+      return;
+    }
+
+    stopVoiceActivity();
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+    mediaStreamRef.current = null;
+    mediaRecorderRef.current = null;
+  };
+
+  const getRecordingMimeType = () => {
+    if (typeof MediaRecorder === 'undefined') return '';
+
+    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+      return 'audio/webm;codecs=opus';
+    }
+
+    if (MediaRecorder.isTypeSupported('audio/webm')) {
+      return 'audio/webm';
+    }
+
+    return '';
+  };
+
+  const startListening = async () => {
     if (Platform.OS !== 'web') {
-      setPhase('ready');
-      setError('David greeting audio is ready on web. Use text for now on this preview.');
+      setError('Microphone input is available in the web preview.');
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('This browser does not support microphone recording. Use Chrome or Edge and allow microphone access.');
       return;
     }
 
     stopCurrentAudio();
     setError(null);
-    setPhase('greeting');
-
-    const audio = new Audio(DAVID_GREETING_AUDIO_URL);
-    currentAudioRef.current = audio;
-    audio.preload = 'auto';
-
-    audio.onended = () => {
-      if (!mountedRef.current) return;
-      currentAudioRef.current = null;
-      setPhase('ready');
-    };
-
-    audio.onerror = () => {
-      if (!mountedRef.current) return;
-      currentAudioRef.current = null;
-      setError('The David greeting audio could not be played. Check public/audio/david-greeting.mp3.');
-      setPhase('ready');
-    };
 
     try {
-      await audio.play();
-    } catch {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getRecordingMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      startVoiceActivity(stream);
+
+      audioChunksRef.current = [];
+      discardRecordingRef.current = false;
+      recordingMimeTypeRef.current = mimeType || recorder.mimeType || 'audio/webm';
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = () => {
+        if (!mountedRef.current) return;
+        stopVoiceActivity();
+        setError('David had trouble accessing the microphone. Check microphone permissions and try again.');
+        setPhase('ready');
+      };
+
+      recorder.onstop = async () => {
+        const chunks = audioChunksRef.current;
+        audioChunksRef.current = [];
+        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+
+        if (!mountedRef.current || !chunks.length) {
+          if (mountedRef.current && !discardRecordingRef.current) {
+            setError("David couldn't hear enough audio. Try holding the mic a little longer.");
+            setPhase('ready');
+          }
+          return;
+        }
+
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          return;
+        }
+
+        setPhase('transcribing');
+
+        try {
+          const audioBlob = new Blob(chunks, {
+            type: recordingMimeTypeRef.current || 'audio/webm',
+          });
+          const result = await transcribeAudio(audioBlob);
+          const transcript = result.transcript.trim();
+
+          if (!transcript) {
+            const reason = result.reason === 'audio_too_small'
+              ? 'Try holding the mic a little longer before tapping stop.'
+              : 'Try speaking a little closer to the microphone.';
+            setError(`David couldn't catch that. ${reason}`);
+            setPhase('ready');
+            return;
+          }
+
+          setTextInput(transcript);
+          await submitUserText(transcript);
+        } catch (err: any) {
+          if (!mountedRef.current) return;
+          setError(err?.message || "David couldn't transcribe that audio.");
+          setPhase('ready');
+        }
+      };
+
+      recorder.start();
+      setPhase('listening');
+    } catch (err: any) {
       if (!mountedRef.current) return;
-      setPhase('tapToBegin');
+      const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
+      setError(
+        denied
+          ? 'Microphone access is blocked. Allow the microphone for localhost in the browser, then try again.'
+          : 'David could not start listening. Check that your microphone is available.',
+      );
+      setPhase('ready');
     }
   };
 
-  const handleTapToBegin = () => {
-    void playGreetingAudio();
+  const handleStartConversation = () => {
+    if (phase === 'ready' || phase === 'error' || phase === 'ended') {
+      void startListening();
+    }
+  };
+
+  const handleEndConversation = () => {
+    stopListening(true);
+    stopCurrentAudio();
+    setTextInput('');
+    setError(null);
+    setPhase('ended');
   };
 
   const playDavidResponseAudio = async (text: string) => {
@@ -240,8 +433,8 @@ export default function VoiceScreen() {
     }
   };
 
-  const handleTextSubmit = async () => {
-    const userText = textInput.trim();
+  const submitUserText = async (rawText: string) => {
+    const userText = rawText.trim();
     if (!userText || phase === 'thinking' || phase === 'speaking') return;
 
     setTextInput('');
@@ -286,6 +479,10 @@ export default function VoiceScreen() {
     }
   };
 
+  const handleTextSubmit = async () => {
+    await submitUserText(textInput);
+  };
+
   if (!userContextLoading && !hasVoiceAccess) {
     return (
       <View style={styles.lockedContainer}>
@@ -300,103 +497,145 @@ export default function VoiceScreen() {
     );
   }
 
-  const inputIsVisible = phase === 'ready' || phase === 'error';
-  const inputIsDisabled = phase === 'thinking' || phase === 'speaking' || phase === 'greeting' || phase === 'tapToBegin';
+  const inputIsVisible = phase === 'ready' || phase === 'error' || phase === 'ended';
+  const inputIsDisabled =
+    phase === 'thinking' ||
+    phase === 'speaking' ||
+    phase === 'listening' ||
+    phase === 'transcribing';
+  const callIsActive =
+    phase === 'listening' ||
+    phase === 'transcribing' ||
+    phase === 'thinking' ||
+    phase === 'speaking';
+  const callButtonIsEnabled = phase !== 'checking';
+  const voiceActivityIsVisible = phase === 'listening';
+
+  const handleCallButtonPress = () => {
+    if (!callButtonIsEnabled) return;
+
+    if (phase === 'listening') {
+      stopListening(false);
+      return;
+    }
+
+    if (callIsActive) {
+      handleEndConversation();
+      return;
+    }
+
+    handleStartConversation();
+  };
 
   return (
-    <ScrollView style={styles.outerContainer} contentContainerStyle={styles.container}>
-      <View style={styles.header}>
-        <Sparkles color="#4F46E5" size={24} />
-        <Text style={styles.title}>Voice with David</Text>
-        <Text style={styles.subtitle}>A calm spiritual companion</Text>
-      </View>
+    <View style={styles.outerContainer}>
+      <TouchableOpacity
+        style={[
+          styles.floatingCallButton,
+          callIsActive ? styles.floatingEndButton : styles.floatingStartButton,
+          !callButtonIsEnabled && styles.floatingCallButtonDisabled,
+        ]}
+        onPress={handleCallButtonPress}
+        disabled={!callButtonIsEnabled}
+        accessibilityRole="button"
+        accessibilityLabel={callIsActive ? 'End conversation with David' : 'Start conversation with David'}
+      >
+        {callIsActive ? (
+          <PhoneOff color="#ffffff" size={24} />
+        ) : (
+          <PhoneCall color="#ffffff" size={24} />
+        )}
+      </TouchableOpacity>
 
-      <View style={styles.visualizerContainer}>
-        <View
-          style={[
-            styles.mainCircle,
-            (phase === 'greeting' || phase === 'speaking') && styles.mainSpeaking,
-            phase === 'ready' && styles.mainReady,
-          ]}
-        >
-          {phase === 'checking' || phase === 'thinking' ? (
-            <ActivityIndicator color="#d4af37" size="large" />
-          ) : phase === 'greeting' || phase === 'speaking' ? (
-            <Volume2 color="#d4af37" size={42} />
-          ) : (
-            <Mic color="#ffffff" size={42} />
-          )}
+      {voiceActivityIsVisible && (
+        <View style={styles.voiceActivityIndicator} pointerEvents="none">
+          {voiceLevels.map((level, index) => (
+            <View
+              key={index}
+              style={[
+                styles.voiceActivityBar,
+                {
+                  height: 5 + level * 24,
+                  opacity: 0.52 + level * 0.48,
+                },
+              ]}
+            />
+          ))}
         </View>
-      </View>
+      )}
 
-      <View style={styles.statusContainer}>
-        <Text style={styles.statusText}>
-          {phase === 'checking'
-            ? 'Getting David ready...'
-            : phase === 'greeting'
-              ? 'David is greeting you...'
-              : phase === 'tapToBegin'
-                ? 'Tap to begin so David can greet you.'
+      <ScrollView style={styles.scrollArea} contentContainerStyle={styles.container}>
+        <View style={styles.header}>
+          <Sparkles color="#4F46E5" size={24} />
+          <Text style={styles.title}>Voice with David</Text>
+          <Text style={styles.subtitle}>A calm spiritual companion</Text>
+        </View>
+
+        <View style={styles.statusContainer}>
+          <Text style={styles.statusText}>
+            {phase === 'checking'
+              ? 'Getting David ready...'
+              : phase === 'ended'
+                ? 'Call ended. Start again when you are ready.'
                 : phase === 'thinking'
                   ? 'David is reflecting...'
-                  : phase === 'speaking'
-                    ? 'David is speaking...'
-                    : "Tell David how you're feeling."}
-        </Text>
-      </View>
-
-      {phase === 'tapToBegin' && (
-        <TouchableOpacity style={styles.tapButton} onPress={handleTapToBegin}>
-          <Text style={styles.tapButtonText}>Tap to begin</Text>
-        </TouchableOpacity>
-      )}
-
-      {lastResponseText.trim().length > 0 && (
-        <View style={styles.responseCard}>
-          <Text style={styles.responseLabel}>David says:</Text>
-          <Text style={styles.responseText}>{lastResponseText}</Text>
+                  : phase === 'listening'
+                    ? 'David is listening... tap the red button when you finish.'
+                    : phase === 'transcribing'
+                      ? 'David is hearing what you said...'
+                      : phase === 'speaking'
+                        ? 'David is speaking...'
+                        : "Tap the green phone to start."}
+          </Text>
         </View>
-      )}
 
-      {inputIsVisible && (
-        <View style={styles.textInputContainer}>
-          <Text style={styles.textInputLabel}>Share your mood with David</Text>
-          <View style={styles.textInputRow}>
-            <TextInput
-              style={styles.textInputField}
-              value={textInput}
-              onChangeText={setTextInput}
-              placeholder="Tell David how you're feeling..."
-              placeholderTextColor="rgba(212, 175, 55, 0.45)"
-              onSubmitEditing={handleTextSubmit}
-              returnKeyType="send"
-              editable={!inputIsDisabled}
-              multiline={false}
-            />
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                (!textInput.trim() || inputIsDisabled) && styles.sendButtonDisabled,
-              ]}
-              onPress={handleTextSubmit}
-              disabled={!textInput.trim() || inputIsDisabled}
-            >
-              <Send color="#0b1e3d" size={18} />
-            </TouchableOpacity>
+        {lastResponseText.trim().length > 0 && (
+          <View style={styles.responseCard}>
+            <Text style={styles.responseLabel}>David says:</Text>
+            <Text style={styles.responseText}>{lastResponseText}</Text>
           </View>
-        </View>
-      )}
+        )}
 
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
+        {inputIsVisible && (
+          <View style={styles.textInputContainer}>
+            <Text style={styles.textInputLabel}>Share your mood with David</Text>
+            <View style={styles.textInputRow}>
+              <TextInput
+                style={styles.textInputField}
+                value={textInput}
+                onChangeText={setTextInput}
+                placeholder="Tell David how you're feeling..."
+                placeholderTextColor="rgba(212, 175, 55, 0.45)"
+                onSubmitEditing={handleTextSubmit}
+                returnKeyType="send"
+                editable={!inputIsDisabled}
+                multiline={false}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  (!textInput.trim() || inputIsDisabled) && styles.sendButtonDisabled,
+                ]}
+                onPress={handleTextSubmit}
+                disabled={!textInput.trim() || inputIsDisabled}
+              >
+                <Send color="#0b1e3d" size={18} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
-      <Text style={styles.disclaimer}>
-        David is a spiritual companion for encouragement and reflection. For emergencies or professional care, contact a trusted local support person or professional.
-      </Text>
-    </ScrollView>
+        {error && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        <Text style={styles.disclaimer}>
+          David is a spiritual companion for encouragement and reflection. For emergencies or professional care, contact a trusted local support person or professional.
+        </Text>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -404,11 +643,65 @@ const styles = StyleSheet.create({
   outerContainer: {
     flex: 1,
     backgroundColor: '#07162b',
+    position: 'relative',
+  },
+  scrollArea: {
+    flex: 1,
+  },
+  floatingCallButton: {
+    position: 'absolute',
+    top: 18,
+    right: 18,
+    zIndex: 10,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  floatingStartButton: {
+    backgroundColor: '#16a34a',
+    shadowColor: '#22c55e',
+  },
+  floatingEndButton: {
+    backgroundColor: '#dc2626',
+    shadowColor: '#ef4444',
+  },
+  floatingCallButtonDisabled: {
+    opacity: 0.45,
+    shadowOpacity: 0.08,
+  },
+  voiceActivityIndicator: {
+    position: 'absolute',
+    top: 78,
+    right: 19,
+    zIndex: 9,
+    width: 52,
+    height: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  voiceActivityBar: {
+    width: 3,
+    borderRadius: 999,
+    backgroundColor: '#d4af37',
+    shadowColor: '#d4af37',
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
   },
   container: {
     minHeight: '100%',
     alignItems: 'center',
-    paddingTop: 80,
+    paddingTop: 92,
     paddingHorizontal: 28,
     paddingBottom: 44,
   },
@@ -459,34 +752,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textTransform: 'uppercase',
     letterSpacing: 1,
-  },
-  visualizerContainer: {
-    width: 128,
-    height: 128,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  mainCircle: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: '#0b1e3d',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#d4af37',
-    shadowColor: '#d4af37',
-    shadowOpacity: 0.22,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  mainSpeaking: {
-    backgroundColor: '#102d57',
-    borderColor: '#f5d77a',
-  },
-  mainReady: {
-    backgroundColor: '#0f2a52',
   },
   statusContainer: {
     marginBottom: 22,

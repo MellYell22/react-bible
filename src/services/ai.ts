@@ -20,6 +20,24 @@ export type GenerateSpeechOptions = {
   withThinkingDelay?: boolean;
 };
 
+let speechConfiguredCache: boolean | null = null;
+
+const isSpeechConfigured = async (): Promise<boolean> => {
+  if (speechConfiguredCache !== null) return speechConfiguredCache;
+
+  try {
+    const response = await fetch('/api/health');
+    if (!response.ok) return true;
+
+    const data = await response.json();
+    const configured = data?.configured?.ELEVENLABS_API_KEY !== false;
+    speechConfiguredCache = configured;
+    return configured;
+  } catch {
+    return true;
+  }
+};
+
 export const getMoodScriptures = async (
   mood: string,
   translation: string = 'NIV',
@@ -102,6 +120,12 @@ export type DavidVoiceResponse = {
   moodKey?: string | null;
   verseUsed?: string | null;
   resetUsedVerses?: boolean;
+};
+
+export type TranscribeAudioResult = {
+  transcript: string;
+  rejected?: boolean;
+  reason?: string;
 };
 
 const safeText = (text: string, maxLength = 280): string =>
@@ -401,6 +425,10 @@ export const generateSpeech = async (
 
   if (!speechText) return null;
 
+  if (!(await isSpeechConfigured())) {
+    return null;
+  }
+
   const response = await fetch('/api/speech', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -412,6 +440,11 @@ export const generateSpeech = async (
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     const details = `${error.details || error.error || ''}`;
+
+    if (response.status === 503 && error.code === 'voice_not_configured') {
+      speechConfiguredCache = false;
+      return null;
+    }
 
     if (response.status === 401 || details.toLowerCase().includes('invalid_api_key')) {
       throw new Error('ElevenLabs rejected the current API key. David can respond in text, but voice audio cannot be generated yet.');
@@ -426,4 +459,30 @@ export const generateSpeech = async (
   }
 
   return URL.createObjectURL(blob);
+};
+
+export const transcribeAudio = async (audioBlob: Blob): Promise<TranscribeAudioResult> => {
+  if (!audioBlob.size) {
+    return { transcript: '', rejected: true, reason: 'audio_empty' };
+  }
+
+  const response = await fetch('/api/transcribe', {
+    method: 'POST',
+    headers: {
+      'Content-Type': audioBlob.type || 'audio/webm',
+    },
+    body: audioBlob,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || data.error || `David could not hear that audio (${response.status}).`);
+  }
+
+  return {
+    transcript: typeof data.transcript === 'string' ? data.transcript : '',
+    rejected: Boolean(data.rejected),
+    reason: typeof data.reason === 'string' ? data.reason : undefined,
+  };
 };

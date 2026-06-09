@@ -32,7 +32,11 @@ export default async function handler(req: any, res: any) {
 
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'ELEVENLABS_API_KEY not set' });
+    return res.status(503).json({
+      code: 'voice_not_configured',
+      error: 'David voice audio is not configured yet.',
+      message: 'Add ELEVENLABS_API_KEY to the server environment to enable spoken audio.',
+    });
   }
 
   const voiceId = process.env.ELEVENLABS_VOICE_ID || DAVID_ELEVENLABS_VOICE_ID;
