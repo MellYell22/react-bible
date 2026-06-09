@@ -5,6 +5,10 @@ const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_44
 
 import { humanizeForTts } from '../src/utils/davidSpeechDelivery';
 
+function previewLogText(value: string, maxLength = 180): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
 function cleanTranscript(text: string): string {
   return text
     .replace(/``` *?```/g, ' ')
@@ -55,12 +59,14 @@ export default async function handler(req: any, res: any) {
       },
     };
 
-    console.log('[Speech] ElevenLabs request', {
+    console.log('[API Request] ElevenLabs text-to-speech', {
       url: speechUrl,
       voiceId,
       model: ELEVENLABS_MODEL,
       outputFormat: ELEVENLABS_OUTPUT_FORMAT,
-      textPreview: cleanText.substring(0, 200),
+      textLength: cleanText.length,
+      textPreview: previewLogText(cleanText),
+      voiceSettings: requestPayload.voice_settings,
     });
 
     const response = await fetch(speechUrl, {
@@ -75,9 +81,11 @@ export default async function handler(req: any, res: any) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[Speech] ElevenLabs failed', {
+      console.error('[API Response] ElevenLabs text-to-speech', {
+        ok: false,
         status: response.status,
         statusText: response.statusText,
+        contentType: response.headers.get('content-type'),
         responseBodyPreview: errorText.substring(0, 1000),
         request: {
           voiceId,
@@ -95,6 +103,13 @@ export default async function handler(req: any, res: any) {
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+    console.log('[API Response] ElevenLabs text-to-speech', {
+      ok: true,
+      status: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get('content-type'),
+      audioBytes: buffer.length,
+    });
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', buffer.length);

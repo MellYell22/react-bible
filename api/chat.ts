@@ -16,6 +16,10 @@ import type { DavidScriptureGuidance } from '../src/utils/davidMoodContext.js';
 const DAVID_CHAT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const DAVID_CHAT_TEMPERATURE = 0.88;
 
+const previewLogText = (value: string, maxLength = 180): string => (
+  value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
+);
+
 type ChatLikeMessage = {
   role?: string;
   content?: string;
@@ -100,6 +104,23 @@ export default async function handler(req: any, res: any) {
     console.log(`[Chat API] Mood context: ${scriptureGuidance.moodKey || resolvedMoodKey || 'none'}, verse=${scriptureGuidance.scripture?.reference || 'none'}`);
 
     const systemMessage = { role: 'system' as const, content: systemPrompt };
+    const latestUserText = getLatestUserText(messages);
+    const requestLog = {
+      model: DAVID_CHAT_MODEL,
+      stream: Boolean(stream),
+      messageCount: messages.length,
+      latestUserPreview: previewLogText(latestUserText),
+      moodKey: scriptureGuidance.moodKey || resolvedMoodKey || null,
+      verse: scriptureGuidance.scripture?.reference || null,
+      usedVerseCount: usedVerseRefs.length,
+      voiceContextLength: typeof voiceContext === 'string' ? voiceContext.length : 0,
+      systemPromptLength: systemPrompt.length,
+      temperature: DAVID_CHAT_TEMPERATURE,
+      presencePenalty: 0.25,
+      frequencyPenalty: 0.35,
+      maxTokens: 260,
+    };
+    console.log('[API Request] OpenAI chat.completions.create', requestLog);
 
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -116,12 +137,19 @@ export default async function handler(req: any, res: any) {
         max_tokens: 260,
       });
 
+      let streamedChars = 0;
       for await (const chunk of completion) {
         const content = chunk.choices[0]?.delta?.content || '';
         if (content) {
+          streamedChars += content.length;
           res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
         }
       }
+      console.log('[API Response] OpenAI chat.completions.create', {
+        stream: true,
+        streamedChars,
+        finish: 'done',
+      });
       res.write('data: [DONE]\n\n');
       res.end();
     } else {
@@ -134,6 +162,14 @@ export default async function handler(req: any, res: any) {
         max_tokens: 260,
       });
       const text = completion.choices[0].message.content || '';
+      console.log('[API Response] OpenAI chat.completions.create', {
+        stream: false,
+        id: completion.id,
+        model: completion.model,
+        finishReason: completion.choices[0]?.finish_reason || null,
+        textLength: text.length,
+        textPreview: previewLogText(text),
+      });
       console.log(`[Chat API] Response (${text.length} chars): ${text.substring(0, 100)}...`);
       res.status(200).json({
         text,

@@ -22,6 +22,23 @@ export type GenerateSpeechOptions = {
 
 let speechConfiguredCache: boolean | null = null;
 
+const previewText = (value: string, maxLength = 160): string => (
+  value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
+);
+
+const getResponseHeaders = (response: Response) => ({
+  contentType: response.headers.get('content-type'),
+  contentLength: response.headers.get('content-length'),
+});
+
+const logApiRequest = (label: string, params: Record<string, unknown>) => {
+  console.log(`[API Request] ${label}`, params);
+};
+
+const logApiResponse = (label: string, params: Record<string, unknown>) => {
+  console.log(`[API Response] ${label}`, params);
+};
+
 const isSpeechConfigured = async (): Promise<boolean> => {
   if (speechConfiguredCache !== null) return speechConfiguredCache;
 
@@ -299,28 +316,64 @@ export const getDavidVoiceResponse = async (
     messages[messages.length - 1].content += `\n\n[Instruction: ${lengthInstruction}]`;
   }
 
-  console.log("OPENAI REQUEST SENT - Chat");
+  const latestUserMessage = [...history].reverse().find(message => message.role === 'user')?.content || '';
+  const chatPayload = {
+    messages,
+    moodKey: options.moodKey,
+    voiceContext,
+    usedVerses: combinedUsedVerses,
+  };
+
+  logApiRequest('POST /api/chat', {
+    mode: 'json',
+    messageCount: messages.length,
+    latestUserPreview: previewText(latestUserMessage),
+    moodKey: options.moodKey || null,
+    usedVerseCount: combinedUsedVerses.length,
+    voiceContextLength: voiceContext.length,
+    responseLength,
+  });
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages,
-      moodKey: options.moodKey,
-      voiceContext,
-      usedVerses: combinedUsedVerses,
-    })
+    body: JSON.stringify(chatPayload)
   });
 
   if (!response.ok) {
-    throw new Error(await getFriendlyApiErrorMessage(response, `Failed to get chat response (${response.status})`));
+    const errorBody = await response.text().catch(() => '');
+    let errorMessage = errorBody;
+    try {
+      const parsed = JSON.parse(errorBody);
+      errorMessage = parsed.message || parsed.error || errorBody;
+    } catch {
+      // Keep the raw body preview when the response is plain text.
+    }
+    logApiResponse('POST /api/chat', {
+      ok: false,
+      status: response.status,
+      statusText: response.statusText,
+      ...getResponseHeaders(response),
+      bodyPreview: previewText(errorBody, 300),
+    });
+    throw new Error(errorMessage || `Failed to get chat response (${response.status})`);
   }
 
-  console.log("OPENAI RESPONSE RECEIVED - Chat");
   const data = await response.json();
+  logApiResponse('POST /api/chat', {
+    ok: true,
+    status: response.status,
+    statusText: response.statusText,
+    ...getResponseHeaders(response),
+    textLength: typeof data.text === 'string' ? data.text.length : 0,
+    textPreview: typeof data.text === 'string' ? previewText(data.text) : '',
+    moodKey: data.moodKey || null,
+    verseUsed: data.verseUsed || null,
+    fallback: Boolean(data.fallback),
+  });
+
   const text = data.text || '';
   const moodKey = data.moodKey || options.moodKey || null;
   const verseUsed = data.verseUsed || null;
-  const latestUserMessage = [...history].reverse().find(message => message.role === 'user')?.content || '';
 
   if (memoryUserId && latestUserMessage && text) {
     await saveDavidConversationMemory({
@@ -366,19 +419,43 @@ export const getChatResponseStream = async (
     messages[messages.length - 1].content += `\n\n[Instruction: ${lengthInstruction}]`;
   }
 
-  console.log("OPENAI REQUEST SENT - Chat Stream");
+  const latestUserMessage = [...history].reverse().find(message => message.role === 'user')?.content || '';
+  const streamPayload = { messages, stream: true, moodKey, voiceContext };
+
+  logApiRequest('POST /api/chat', {
+    mode: 'stream',
+    messageCount: messages.length,
+    latestUserPreview: previewText(latestUserMessage),
+    moodKey: moodKey || null,
+    voiceContextLength: voiceContext.length,
+    responseLength,
+  });
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, stream: true, moodKey, voiceContext })
+    body: JSON.stringify(streamPayload)
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
+    logApiResponse('POST /api/chat', {
+      ok: false,
+      mode: 'stream',
+      status: response.status,
+      statusText: response.statusText,
+      ...getResponseHeaders(response),
+      error,
+    });
     throw new Error(error.message || error.error || `Failed to get chat stream (${response.status})`);
   }
 
-  console.log("OPENAI RESPONSE RECEIVED - Chat Stream Start");
+  logApiResponse('POST /api/chat', {
+    ok: true,
+    mode: 'stream_start',
+    status: response.status,
+    statusText: response.statusText,
+    ...getResponseHeaders(response),
+  });
 
   const reader = response.body?.getReader();
   const decoder = new TextDecoder();
@@ -408,6 +485,13 @@ export const getChatResponseStream = async (
     }
   }
 
+  logApiResponse('POST /api/chat', {
+    ok: true,
+    mode: 'stream_complete',
+    textLength: fullText.length,
+    textPreview: previewText(fullText),
+  });
+
   return fullText;
 };
 
@@ -429,17 +513,33 @@ export const generateSpeech = async (
     return null;
   }
 
+  const speechPayload = {
+    text: speechText,
+  };
+
+  logApiRequest('POST /api/speech', {
+    textLength: speechText.length,
+    textPreview: previewText(speechText),
+    alreadyPrepared: Boolean(options.alreadyPrepared),
+    skipHumanize: Boolean(options.skipHumanize),
+    isGreeting: Boolean(options.isGreeting),
+  });
   const response = await fetch('/api/speech', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text: speechText,
-    }),
+    body: JSON.stringify(speechPayload),
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     const details = `${error.details || error.error || ''}`;
+    logApiResponse('POST /api/speech', {
+      ok: false,
+      status: response.status,
+      statusText: response.statusText,
+      ...getResponseHeaders(response),
+      error,
+    });
 
     if (response.status === 503 && error.code === 'voice_not_configured') {
       speechConfiguredCache = false;
@@ -454,6 +554,13 @@ export const generateSpeech = async (
   }
 
   const blob = await response.blob();
+  logApiResponse('POST /api/speech', {
+    ok: true,
+    status: response.status,
+    statusText: response.statusText,
+    ...getResponseHeaders(response),
+    audioBytes: blob.size,
+  });
   if (!blob.size) {
     throw new Error("David's voice audio came back empty.");
   }
@@ -466,6 +573,10 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<TranscribeAudioR
     return { transcript: '', rejected: true, reason: 'audio_empty' };
   }
 
+  logApiRequest('POST /api/transcribe', {
+    audioBytes: audioBlob.size,
+    audioType: audioBlob.type || 'audio/webm',
+  });
   const response = await fetch('/api/transcribe', {
     method: 'POST',
     headers: {
@@ -475,6 +586,18 @@ export const transcribeAudio = async (audioBlob: Blob): Promise<TranscribeAudioR
   });
 
   const data = await response.json().catch(() => ({}));
+  logApiResponse('POST /api/transcribe', {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    ...getResponseHeaders(response),
+    transcriptLength: typeof data.transcript === 'string' ? data.transcript.length : 0,
+    transcriptPreview: typeof data.transcript === 'string' ? previewText(data.transcript) : '',
+    rejected: Boolean(data.rejected),
+    reason: data.reason || null,
+    error: data.error || null,
+    message: data.message || null,
+  });
 
   if (!response.ok) {
     throw new Error(data.message || data.error || `David could not hear that audio (${response.status}).`);

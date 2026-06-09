@@ -24,6 +24,10 @@ const MIN_MEANINGFUL_WORDS = 2;
 const MIN_MEANINGFUL_LETTERS = 8;
 const MIN_AUDIO_BYTES = 5000;
 
+function previewLogText(value: string, maxLength = 180): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
 function isJunkTranscript(normalized: string): boolean {
   if (!normalized || normalized.length < 3) return true;
   if (JUNK_TRANSCRIPT_PATTERNS.some(re => re.test(normalized))) return true;
@@ -151,6 +155,16 @@ export default async function handler(req: any, res: any) {
     // Create a File-like object from the buffer
     const audioFile = new File([audioBuffer], audioFilename, { type: mimeType });
 
+    console.log('[API Request] OpenAI audio.transcriptions.create', {
+      model: 'whisper-1',
+      language: 'en',
+      responseFormat: 'json',
+      prompt: 'Spiritual conversation in English.',
+      temperature: 0,
+      filename: audioFilename,
+      mimeType,
+      audioBytes: audioBuffer.length,
+    });
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: 'whisper-1',
@@ -163,6 +177,12 @@ export default async function handler(req: any, res: any) {
 
     const rawTranscript = transcription.text?.trim() || '';
     const sanitized = sanitizeTranscript(rawTranscript);
+    console.log('[API Response] OpenAI audio.transcriptions.create', {
+      transcriptLength: rawTranscript.length,
+      transcriptPreview: previewLogText(rawTranscript),
+      rejected: Boolean(sanitized.rejected),
+      reason: sanitized.reason || null,
+    });
     console.log(`[Transcribe] Raw: "${rawTranscript}" → ${sanitized.rejected ? `rejected (${sanitized.reason})` : 'accepted'}`);
 
     return res.status(200).json(sanitized);

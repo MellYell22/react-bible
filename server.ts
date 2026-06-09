@@ -39,6 +39,10 @@ const openai = new OpenAI({
 });
 const DAVID_CHAT_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
+const previewLogText = (value: string, maxLength = 180): string => (
+  value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
+);
+
 // ... (existing code for lazy Stripe initialization)
 let stripeInstance: Stripe | null = null;
 function getStripe() {
@@ -329,8 +333,6 @@ app.post("/api/chat", async (req, res) => {
     : [];
   const scriptureGuidance = buildDavidScriptureGuidance(resolvedMoodKey, usedVerseRefs);
 
-  console.log("OPENAI REQUEST SENT - Chat");
-
   try {
     const openaiClient = new OpenAI({ apiKey: openaiApiKey });
     const baseSystemPrompt = buildDavidSystemPromptFromGuidance(scriptureGuidance);
@@ -339,6 +341,23 @@ app.post("/api/chat", async (req, res) => {
       : '';
     const systemPrompt = `${baseSystemPrompt}${recentVoiceContext}`;
     console.log(`[Chat] Mood context: ${scriptureGuidance.moodKey || resolvedMoodKey || 'none'}, verse=${scriptureGuidance.scripture?.reference || 'none'}`);
+    const latestUserText = [...messages].reverse().find((message: any) => message?.role === 'user')?.content || '';
+    const chatRequestLog = {
+      model: DAVID_CHAT_MODEL,
+      stream: Boolean(stream),
+      messageCount: messages.length,
+      latestUserPreview: previewLogText(latestUserText),
+      moodKey: scriptureGuidance.moodKey || resolvedMoodKey || null,
+      verse: scriptureGuidance.scripture?.reference || null,
+      usedVerseCount: usedVerseRefs.length,
+      voiceContextLength: typeof voiceContext === 'string' ? voiceContext.length : 0,
+      systemPromptLength: systemPrompt.length,
+      temperature: DAVID_CHAT_TEMPERATURE,
+      presencePenalty: 0.35,
+      frequencyPenalty: 0.45,
+      maxTokens: 260,
+    };
+    console.log('[API Request] OpenAI chat.completions.create', chatRequestLog);
 
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -355,13 +374,19 @@ app.post("/api/chat", async (req, res) => {
         max_tokens: 260,
       });
 
+      let streamedChars = 0;
       for await (const chunk of completion) {
         const content = chunk.choices[0]?.delta?.content || "";
         if (content) {
+          streamedChars += content.length;
           res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
         }
       }
-      console.log("OPENAI RESPONSE RECEIVED - Chat Stream");
+      console.log('[API Response] OpenAI chat.completions.create', {
+        stream: true,
+        streamedChars,
+        finish: 'done',
+      });
       res.write('data: [DONE]\n\n');
       res.end();
     } else {
@@ -374,6 +399,14 @@ app.post("/api/chat", async (req, res) => {
         max_tokens: 260,
       });
       const text = completion.choices[0].message.content || '';
+      console.log('[API Response] OpenAI chat.completions.create', {
+        stream: false,
+        id: completion.id,
+        model: completion.model,
+        finishReason: completion.choices[0]?.finish_reason || null,
+        textLength: text.length,
+        textPreview: previewLogText(text),
+      });
       console.log(`[Chat] Response (${text.length} chars): ${text.substring(0, 80)}…`);
       res.json({
         text,
@@ -623,6 +656,16 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
       return res.json({ transcript: '', rejected: true, reason: 'audio_too_small' });
     }
 
+    console.log('[API Request] OpenAI audio.transcriptions.create', {
+      model: 'whisper-1',
+      language: 'en',
+      responseFormat: 'json',
+      prompt: 'Spiritual conversation in English.',
+      temperature: 0,
+      filename: safeFilename,
+      mimeType,
+      audioBytes: audioBuffer.length,
+    });
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: 'whisper-1',
@@ -634,6 +677,12 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
 
     const rawTranscript = transcription.text?.trim() || '';
     const accepted = isMeaningful(rawTranscript);
+    console.log('[API Response] OpenAI audio.transcriptions.create', {
+      transcriptLength: rawTranscript.length,
+      transcriptPreview: previewLogText(rawTranscript),
+      accepted,
+      reason: accepted ? null : 'not_meaningful',
+    });
     console.log(`[Transcribe] raw="${rawTranscript}" accepted=${accepted}`);
     res.json({
       transcript: accepted ? rawTranscript : '',
@@ -681,8 +730,27 @@ app.post("/api/speech", async (req, res) => {
   const voiceId = process.env.ELEVENLABS_VOICE_ID || DAVID_ELEVENLABS_VOICE_ID;
 
   try {
-    console.log(`[Speech] Calling ElevenLabs model=${ELEVENLABS_MODEL} voice=${voiceId} text="${cleanText.substring(0, 60)}..."`);
     const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`;
+    const requestPayload = {
+      text: cleanText,
+      model_id: ELEVENLABS_MODEL,
+      voice_settings: {
+        stability: 0.5,        // lower = more natural conversational variation
+        similarity_boost: 0.88,
+        speed: 1.0,            // natural pace — no artificial slowdown
+        style: 0.3,
+        use_speaker_boost: true,
+      },
+    };
+    console.log('[API Request] ElevenLabs text-to-speech', {
+      url: speechUrl,
+      voiceId,
+      model: ELEVENLABS_MODEL,
+      outputFormat: ELEVENLABS_OUTPUT_FORMAT,
+      textLength: cleanText.length,
+      textPreview: previewLogText(cleanText),
+      voiceSettings: requestPayload.voice_settings,
+    });
     const response = await fetch(speechUrl, {
       method: 'POST',
       headers: {
@@ -690,21 +758,18 @@ app.post("/api/speech", async (req, res) => {
         'Content-Type': 'application/json',
         'Accept': 'audio/mpeg',
       },
-      body: JSON.stringify({
-        text: cleanText,
-        model_id: ELEVENLABS_MODEL,
-        voice_settings: {
-          stability: 0.5,        // lower = more natural conversational variation
-          similarity_boost: 0.88,
-          speed: 1.0,            // natural pace — no artificial slowdown
-          style: 0.3,
-          use_speaker_boost: true,
-        },
-      }),
+      body: JSON.stringify(requestPayload),
     });
 
     if (!response.ok) {
       const body = await response.text();
+      console.error('[API Response] ElevenLabs text-to-speech', {
+        ok: false,
+        status: response.status,
+        statusText: response.statusText,
+        contentType: response.headers.get('content-type'),
+        bodyPreview: previewLogText(body, 500),
+      });
       console.error(`[Speech] ElevenLabs failed: HTTP ${response.status} — ${body.substring(0, 500)}`);
       return res.status(response.status).json({
         error: `ElevenLabs TTS failed (${response.status})`,
@@ -714,6 +779,13 @@ app.post("/api/speech", async (req, res) => {
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+    console.log('[API Response] ElevenLabs text-to-speech', {
+      ok: true,
+      status: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get('content-type'),
+      audioBytes: buffer.length,
+    });
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', buffer.length);
     return res.send(buffer);
