@@ -3,7 +3,7 @@ const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_v3';
 const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_44100_128';
 
-import { humanizeForTts } from '../src/utils/davidSpeechDelivery';
+import { humanizeForTts } from '../src/utils/davidSpeechDelivery.js';
 
 function previewLogText(value: string, maxLength = 180): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
