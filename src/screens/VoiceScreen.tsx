@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   ScrollView,
   StyleSheet,
@@ -9,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Lock, PhoneCall, PhoneOff, Send, Sparkles } from 'lucide-react';
+import { Lock, Mic, Send, Sparkles, Square } from 'lucide-react';
 
 import { generateSpeech, getDavidVoiceResponse, transcribeAudio } from '../services/ai';
 import { useUser } from '../UserContext';
@@ -200,13 +199,19 @@ export default function VoiceScreen() {
         const now = performance.now();
 
         const nextLevels = IDLE_VOICE_LEVELS.map((idleLevel, index) => {
+          const ambientPulse =
+            Math.abs(Math.sin(now / 210 + index * 0.74)) * 0.13 +
+            Math.abs(Math.cos(now / 310 + index * 0.41)) * 0.08;
           const movement =
             0.5 +
             Math.abs(Math.sin(now / 175 + index * 0.82)) * 0.34 +
             Math.abs(Math.cos(now / 260 + index * 0.53)) * 0.16;
-          const target = Math.max(0.12, Math.min(1, idleLevel + normalizedVolume * movement));
+          const target = Math.max(
+            0.16,
+            Math.min(1, idleLevel + ambientPulse + normalizedVolume * movement * 0.68),
+          );
           const previous = voiceLevelsRef.current[index] || idleLevel;
-          const smoothing = normalizedVolume > 0.04 ? 0.36 : 0.12;
+          const smoothing = 0.2 + normalizedVolume * 0.18;
 
           return previous + (target - previous) * smoothing;
         });
@@ -361,11 +366,11 @@ export default function VoiceScreen() {
   };
 
   const handleEndConversation = () => {
-    stopListening(true);
-    stopCurrentAudio();
-    setTextInput('');
+    if (phase !== 'listening') return;
+
     setError(null);
-    setPhase('ended');
+    stopListening(false);
+    setPhase('transcribing');
   };
 
   const playDavidResponseAudio = async (text: string) => {
@@ -503,67 +508,13 @@ export default function VoiceScreen() {
     phase === 'speaking' ||
     phase === 'listening' ||
     phase === 'transcribing';
-  const callIsActive =
-    phase === 'listening' ||
-    phase === 'transcribing' ||
-    phase === 'thinking' ||
-    phase === 'speaking';
-  const callButtonIsEnabled = phase !== 'checking';
   const voiceActivityIsVisible = phase === 'listening';
-
-  const handleCallButtonPress = () => {
-    if (!callButtonIsEnabled) return;
-
-    if (phase === 'listening') {
-      stopListening(false);
-      return;
-    }
-
-    if (callIsActive) {
-      handleEndConversation();
-      return;
-    }
-
-    handleStartConversation();
-  };
+  const startConversationIsEnabled = phase === 'ready' || phase === 'error' || phase === 'ended';
+  const endConversationIsEnabled = phase === 'listening';
+  const voiceWaveLabel = voiceActivityIsVisible ? 'Listening' : 'Voice ready';
 
   return (
     <View style={styles.outerContainer}>
-      <TouchableOpacity
-        style={[
-          styles.floatingCallButton,
-          callIsActive ? styles.floatingEndButton : styles.floatingStartButton,
-          !callButtonIsEnabled && styles.floatingCallButtonDisabled,
-        ]}
-        onPress={handleCallButtonPress}
-        disabled={!callButtonIsEnabled}
-        accessibilityRole="button"
-        accessibilityLabel={callIsActive ? 'End conversation with David' : 'Start conversation with David'}
-      >
-        {callIsActive ? (
-          <PhoneOff color="#ffffff" size={24} />
-        ) : (
-          <PhoneCall color="#ffffff" size={24} />
-        )}
-      </TouchableOpacity>
-
-      {voiceActivityIsVisible && (
-        <View style={styles.voiceActivityIndicator} pointerEvents="none">
-          {voiceLevels.map((level, index) => (
-            <View
-              key={index}
-              style={[
-                styles.voiceActivityBar,
-                {
-                  height: 5 + level * 24,
-                  opacity: 0.52 + level * 0.48,
-                },
-              ]}
-            />
-          ))}
-        </View>
-      )}
-
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <Sparkles color="#4F46E5" size={24} />
@@ -580,13 +531,102 @@ export default function VoiceScreen() {
                 : phase === 'thinking'
                   ? 'David is reflecting...'
                   : phase === 'listening'
-                    ? 'David is listening... tap the red button when you finish.'
+                    ? 'David is listening now. Tap End Conversation when you finish.'
                     : phase === 'transcribing'
-                      ? 'David is hearing what you said...'
+                      ? 'Sending your words to David...'
                       : phase === 'speaking'
                         ? 'David is speaking...'
-                        : "Tap the green phone to start."}
+                        : 'Tap Start Conversation when you are ready to speak.'}
           </Text>
+        </View>
+
+        <View
+          style={[
+            styles.voiceWavePanel,
+            voiceActivityIsVisible && styles.voiceWavePanelActive,
+          ]}
+          accessibilityRole="image"
+          accessibilityLabel={voiceActivityIsVisible ? 'Active voice wave' : 'Inactive voice wave'}
+        >
+          <View style={styles.voiceWaveHeader}>
+            <View
+              style={[
+                styles.voiceWaveDot,
+                voiceActivityIsVisible && styles.voiceWaveDotActive,
+              ]}
+            />
+            <Text style={styles.voiceWaveLabel}>{voiceWaveLabel}</Text>
+          </View>
+          <View style={styles.voiceWave}>
+            {voiceLevels.map((level, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.voiceWaveBar,
+                  voiceActivityIsVisible && styles.voiceWaveBarActive,
+                  {
+                    height: voiceActivityIsVisible ? 14 + level * 64 : 10 + level * 22,
+                    opacity: voiceActivityIsVisible ? 0.58 + level * 0.42 : 0.28 + level * 0.2,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.conversationControls}>
+          <TouchableOpacity
+            style={[
+              styles.conversationButton,
+              styles.startConversationButton,
+              !startConversationIsEnabled && styles.conversationButtonDisabled,
+            ]}
+            onPress={handleStartConversation}
+            disabled={!startConversationIsEnabled}
+            activeOpacity={0.82}
+            accessibilityRole="button"
+            accessibilityLabel="Start Conversation"
+            accessibilityState={{ disabled: !startConversationIsEnabled }}
+          >
+            <Mic color={startConversationIsEnabled ? '#0b1e3d' : 'rgba(11, 30, 61, 0.42)'} size={18} />
+            <Text
+              style={[
+                styles.conversationButtonText,
+                !startConversationIsEnabled && styles.conversationButtonTextDisabled,
+              ]}
+            >
+              Start Conversation
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.conversationButton,
+              styles.endConversationButton,
+              !endConversationIsEnabled && styles.conversationButtonDisabled,
+            ]}
+            onPress={handleEndConversation}
+            disabled={!endConversationIsEnabled}
+            activeOpacity={0.82}
+            accessibilityRole="button"
+            accessibilityLabel="End Conversation"
+            accessibilityState={{ disabled: !endConversationIsEnabled }}
+          >
+            <Square
+              color={endConversationIsEnabled ? '#fff8dc' : 'rgba(255, 248, 220, 0.38)'}
+              fill={endConversationIsEnabled ? '#fff8dc' : 'rgba(255, 248, 220, 0.16)'}
+              size={15}
+            />
+            <Text
+              style={[
+                styles.conversationButtonText,
+                styles.endConversationButtonText,
+                !endConversationIsEnabled && styles.endConversationButtonTextDisabled,
+              ]}
+            >
+              End Conversation
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {lastResponseText.trim().length > 0 && (
@@ -648,60 +688,10 @@ const styles = StyleSheet.create({
   scrollArea: {
     flex: 1,
   },
-  floatingCallButton: {
-    position: 'absolute',
-    top: 18,
-    right: 18,
-    zIndex: 10,
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  floatingStartButton: {
-    backgroundColor: '#16a34a',
-    shadowColor: '#22c55e',
-  },
-  floatingEndButton: {
-    backgroundColor: '#dc2626',
-    shadowColor: '#ef4444',
-  },
-  floatingCallButtonDisabled: {
-    opacity: 0.45,
-    shadowOpacity: 0.08,
-  },
-  voiceActivityIndicator: {
-    position: 'absolute',
-    top: 78,
-    right: 19,
-    zIndex: 9,
-    width: 52,
-    height: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  voiceActivityBar: {
-    width: 3,
-    borderRadius: 999,
-    backgroundColor: '#d4af37',
-    shadowColor: '#d4af37',
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
-  },
   container: {
     minHeight: '100%',
     alignItems: 'center',
-    paddingTop: 92,
+    paddingTop: 58,
     paddingHorizontal: 28,
     paddingBottom: 44,
   },
@@ -754,7 +744,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   statusContainer: {
-    marginBottom: 22,
+    marginBottom: 18,
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 999,
@@ -767,20 +757,115 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  tapButton: {
-    minWidth: 190,
-    minHeight: 52,
-    borderRadius: 999,
-    backgroundColor: '#d4af37',
+  voiceWavePanel: {
+    width: '100%',
+    maxWidth: 620,
+    minHeight: 132,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.22)',
+    backgroundColor: 'rgba(5, 16, 32, 0.48)',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    marginBottom: 18,
+  },
+  voiceWavePanelActive: {
+    borderColor: 'rgba(245, 215, 122, 0.62)',
+    backgroundColor: 'rgba(11, 30, 61, 0.78)',
+    shadowColor: '#d4af37',
+    shadowOpacity: 0.22,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  voiceWaveHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
-    paddingHorizontal: 24,
+    gap: 8,
+    marginBottom: 12,
   },
-  tapButtonText: {
-    color: '#0b1e3d',
-    fontSize: 16,
+  voiceWaveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(245, 215, 122, 0.28)',
+  },
+  voiceWaveDotActive: {
+    backgroundColor: '#22c55e',
+    shadowColor: '#22c55e',
+    shadowOpacity: 0.7,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  voiceWaveLabel: {
+    color: '#f5d77a',
+    fontSize: 11,
     fontWeight: '800',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  voiceWave: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  voiceWaveBar: {
+    width: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(245, 215, 122, 0.7)',
+  },
+  voiceWaveBarActive: {
+    backgroundColor: '#d4af37',
+    shadowColor: '#d4af37',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  conversationControls: {
+    width: '100%',
+    maxWidth: 620,
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 22,
+  },
+  conversationButton: {
+    flex: 1,
+    minHeight: 54,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+  },
+  startConversationButton: {
+    backgroundColor: '#d4af37',
+    borderColor: 'rgba(245, 215, 122, 0.95)',
+  },
+  endConversationButton: {
+    backgroundColor: '#b91c1c',
+    borderColor: 'rgba(248, 113, 113, 0.82)',
+  },
+  conversationButtonDisabled: {
+    opacity: 0.46,
+  },
+  conversationButtonText: {
+    color: '#0b1e3d',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  conversationButtonTextDisabled: {
+    color: 'rgba(11, 30, 61, 0.42)',
+  },
+  endConversationButtonText: {
+    color: '#fff8dc',
+  },
+  endConversationButtonTextDisabled: {
+    color: 'rgba(255, 248, 220, 0.38)',
   },
   responseCard: {
     width: '100%',

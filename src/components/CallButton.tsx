@@ -32,7 +32,7 @@ export default function CallButton({ onTranscript }: Props) {
     r.interimResults = true;
     r.maxAlternatives = 1;
 
-    r.onresult = (ev: SpeechRecognitionEvent) => {
+    r.onresult = (ev: any) => {
       let interim = '';
       let final = '';
       for (let i = 0; i < ev.results.length; i++) {

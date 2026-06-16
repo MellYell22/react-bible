@@ -6,12 +6,13 @@
   "packageManager": "pnpm@10.33.4",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:vite --external:express --external:stripe --external:@supabase/supabase-js --external:dotenv --external:better-sqlite3",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --outfile=dist/server.js --external:vite --external:express --external:stripe --external:@supabase/supabase-js --external:dotenv --external:better-sqlite3 --external:@daytona/sdk --external:convex",
     "start": "node -e \"process.env.NODE_ENV='production'; import('./dist/server.js')\"",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@daytona/sdk": "^0.187.0",
     "@react-navigation/bottom-tabs": "^7.15.5",
     "@react-navigation/native": "^7.1.33",
     "@supabase/supabase-js": "^2.98.0",
@@ -20,6 +21,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^12.4.1",
     "clsx": "^2.1.1",
+    "convex": "^1.41.0",
     "dotenv": "^17.2.3",
     "esbuild": "^0.27.4",
     "expo-av": "^16.0.8",

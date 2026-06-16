@@ -24,7 +24,11 @@ pnpm-debug.log*
 *.log
 codex-preview-*
 package-lock.json
+!mobile/LovableBuilderExpo/package-lock.json
 .env*.local
+mobile/LovableBuilderExpo/.expo/
+mobile/LovableBuilderExpo/dist-web/
+mobile/LovableBuilderExpo/expo-preview*.log
 
 .vercel
 .env*.local

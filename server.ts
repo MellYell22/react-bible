@@ -13,6 +13,7 @@ import {
   logOpenAIError,
   OPENAI_API_KEY_ENV_NAME,
 } from './lib/openaiEnv';
+import { handleMobileBuilderHttp } from './lib/mobile-builder/http';
 import { DAVID_PERSONALITY_PROMPT, DAVID_CHAT_TEMPERATURE } from './src/constants/persona';
 import { buildDavidScriptureGuidance, buildDavidSystemPromptFromGuidance, resolveMoodKey } from './src/utils/davidMoodContext';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
@@ -305,7 +306,22 @@ app.get("/api/health", (req, res) => {
     status: "ok",
     configured,
     allConfigured: requiredEnvVars.every((name) => Boolean(process.env[name]?.trim())),
+    mobileBuilder: {
+      daytonaConfigured: Boolean(process.env.DAYTONA_API_KEY?.trim()),
+      convexConfigured: Boolean((process.env.CONVEX_URL || process.env.VITE_CONVEX_URL)?.trim()),
+      builderApiBaseUrlConfigured: Boolean(process.env.BUILDER_API_BASE_URL?.trim()),
+    },
   });
+});
+
+app.all(["/api/mobile-builder", "/api/mobile-builder/*"], async (req, res) => {
+  const result = await handleMobileBuilderHttp({
+    method: req.method,
+    url: req.url,
+    body: req.body,
+  });
+
+  res.status(result.status).json(result.body);
 });
 
 // OpenAI API Endpoints

@@ -1,1 +1,16 @@
-{"projectId":"prj_gesxG8bCAhRFWCNQZhj5WZtRz1qu","orgId":"team_gZgkngZ2OPhkw47m18eysszu","projectName":"react-bible"}
+{
+  "projectId": "prj_gesxG8bCAhRFWCNQZhj5WZtRz1qu",
+  "orgId": "team_gZgkngZ2OPhkw47m18eysszu",
+  "projectName": "react-bible",
+  "settings": {
+    "createdAt": 1773006517302,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

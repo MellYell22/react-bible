@@ -53,9 +53,9 @@ function AppShell() {
         {route.name === 'Home' && <HomeScreen navigation={navigation} />}
         {route.name === 'Mood' && <MoodScreen {...screenProps} />}
         {route.name === 'Chat' && <ChatScreen {...screenProps} />}
-        {route.name === 'Voice' && <VoiceScreen {...screenProps} />}
+        {route.name === 'Voice' && <VoiceScreen />}
         {route.name === 'Reflection' && <ReflectionScreen {...screenProps} />}
-        {route.name === 'Bible' && <BibleBrowserScreen {...screenProps} />}
+        {route.name === 'Bible' && <BibleBrowserScreen />}
         {route.name === 'Profile' && <ProfileScreen {...screenProps} />}
       </View>
 
@@ -82,7 +82,7 @@ export default function App() {
 const styles = StyleSheet.create({
   loadingPage: {
     flex: 1,
-    minHeight: Platform.OS === 'web' ? '100vh' : undefined,
+    minHeight: Platform.OS === 'web' ? ('100vh' as any) : undefined,
     backgroundColor: '#0b1e3d',
     alignItems: 'center',
     justifyContent: 'center',
@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
   },
   appShell: {
     flex: 1,
-    minHeight: Platform.OS === 'web' ? '100vh' : undefined,
+    minHeight: Platform.OS === 'web' ? ('100vh' as any) : undefined,
     backgroundColor: '#0b1e3d',
   },
   screenWrap: {

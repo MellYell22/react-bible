@@ -25,6 +25,8 @@
     "noEmit": true
   },
   "exclude": [
-    "supabase/functions"
+    "supabase/functions",
+    "convex",
+    "mobile"
   ]
 }

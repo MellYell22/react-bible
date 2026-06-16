@@ -18,5 +18,10 @@ export default async function handler(req: any, res: any) {
     status: "ok",
     configured,
     allConfigured: requiredEnvVars.every((name) => Boolean(process.env[name]?.trim())),
+    mobileBuilder: {
+      daytonaConfigured: Boolean(process.env.DAYTONA_API_KEY?.trim()),
+      convexConfigured: Boolean((process.env.CONVEX_URL || process.env.VITE_CONVEX_URL)?.trim()),
+      builderApiBaseUrlConfigured: Boolean(process.env.BUILDER_API_BASE_URL?.trim()),
+    },
   });
 }

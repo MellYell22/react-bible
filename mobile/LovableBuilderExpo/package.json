@@ -1,0 +1,26 @@
+{
+  "name": "lovable-builder-expo",
+  "version": "1.0.0",
+  "private": true,
+  "main": "expo/AppEntry",
+  "scripts": {
+    "start": "node ../../node_modules/expo/bin/cli start",
+    "web": "node ../../node_modules/expo/bin/cli start --web",
+    "android": "node ../../node_modules/expo/bin/cli start --android",
+    "export:web": "node ../../node_modules/expo/bin/cli export --platform web --output-dir dist-web",
+    "serve:web": "node preview-server.cjs",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit",
+    "expo:config": "node ../../node_modules/expo/bin/cli config --type public"
+  },
+  "dependencies": {
+    "expo": "56.0.9",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "react-native": "0.84.1",
+    "react-native-web": "0.21.2",
+    "react-native-webview": "13.16.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  }
+}

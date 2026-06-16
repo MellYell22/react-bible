@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Lovable Builder",
+    "slug": "lovable-builder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "lovablebuilder",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aadesigns.lovablebuilder"
+    },
+    "android": {
+      "package": "com.aadesigns.lovablebuilder"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "extra": {
+      "builderApiBaseUrl": "http://localhost:3000"
+    }
+  }
+}
