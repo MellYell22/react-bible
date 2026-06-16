@@ -1,13 +1,16 @@
 declare module 'react-native' {
   import * as React from 'react';
 
-  export class View extends React.Component<any> {}
+  export class View extends React.Component<any> {
+    measureLayout(relativeToNativeNode: any, onSuccess: (...args: any[]) => void, onFail?: () => void): void;
+  }
   export class Text extends React.Component<any> {}
   export class TouchableOpacity extends React.Component<any> {}
   export class ActivityIndicator extends React.Component<any> {}
   export class TextInput extends React.Component<any> {}
   export class ScrollView extends React.Component<any> {
     scrollTo(options?: any): void;
+    scrollToEnd(options?: any): void;
     getInnerViewNode(): any;
   }
   export class RefreshControl extends React.Component<any> {}
@@ -22,6 +25,11 @@ declare module 'react-native' {
 
   export const Alert: {
     alert: (...args: any[]) => void;
+  };
+
+  export const Dimensions: {
+    get: (dimension: string) => { width: number; height: number; scale: number; fontScale: number };
+    addEventListener: (...args: any[]) => { remove?: () => void };
   };
 
   export const StyleSheet: {
