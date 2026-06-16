@@ -53,9 +53,9 @@ function AppShell() {
         {route.name === 'Home' && <HomeScreen navigation={navigation} />}
         {route.name === 'Mood' && <MoodScreen {...screenProps} />}
         {route.name === 'Chat' && <ChatScreen {...screenProps} />}
-        {route.name === 'Voice' && <VoiceScreen {...screenProps} />}
+        {route.name === 'Voice' && <VoiceScreen />}
         {route.name === 'Reflection' && <ReflectionScreen {...screenProps} />}
-        {route.name === 'Bible' && <BibleBrowserScreen {...screenProps} />}
+        {route.name === 'Bible' && <BibleBrowserScreen />}
         {route.name === 'Profile' && <ProfileScreen {...screenProps} />}
       </View>
 
