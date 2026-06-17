@@ -10,6 +10,7 @@ declare module 'react-native' {
   export const TouchableOpacity: React.ComponentType<any>;
   export class ScrollView extends React.Component<any> {
     scrollTo?: (options: any) => void;
+    scrollToEnd?: (options?: any) => void;
     getInnerViewNode?: () => any;
     measureLayout?: (...args: any[]) => void;
   }
