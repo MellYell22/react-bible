@@ -6,12 +6,15 @@ declare module 'react-native' {
   export type TextStyle = Record<string, unknown>;
   export type ImageStyle = Record<string, unknown>;
 
-  export class View extends React.Component<any> {}
+  export class View extends React.Component<any> {
+    measureLayout: (...args: any[]) => void;
+  }
   export class Text extends React.Component<any> {}
   export class TextInput extends React.Component<any> {}
   export class TouchableOpacity extends React.Component<any> {}
   export class ScrollView extends React.Component<any> {
     scrollTo: (...args: any[]) => void;
+    scrollToEnd: (...args: any[]) => void;
     getInnerViewNode: () => any;
   }
   export class ActivityIndicator extends React.Component<any> {}
