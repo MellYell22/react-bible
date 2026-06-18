@@ -24,12 +24,21 @@ serve(async (req) => {
   try {
     const body = await req.json();
     console.log("[create-checkout-session] Received body:", JSON.stringify(body));
-    const { priceId } = body;
+    const { priceId: requestedPriceId } = body;
 
-    if (!priceId) {
-      console.error("[create-checkout-session] Error: Missing priceId");
+    const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
+    if (!proPriceId) {
+      console.error("[create-checkout-session] CRITICAL: STRIPE_PRICE_ID_PRO is not set in Supabase secrets.");
       return new Response(
-        JSON.stringify({ error: "Missing priceId" }),
+        JSON.stringify({ error: "Server configuration error: Pro price missing." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (requestedPriceId && requestedPriceId !== proPriceId) {
+      console.error(`[create-checkout-session] Rejected mismatched priceId. Requested: ${requestedPriceId}, Expected: ${proPriceId}`);
+      return new Response(
+        JSON.stringify({ error: "Invalid checkout price." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -95,14 +104,14 @@ serve(async (req) => {
 
     // Get origin for success/cancel URLs
     const origin = req.headers.get("origin") || Deno.env.get("APP_URL") || "http://localhost:3000";
-    console.log(`[create-checkout-session] Creating session for user: ${userId}, price: ${priceId}, origin: ${origin}`);
+    console.log(`[create-checkout-session] Creating session for user: ${userId}, price: ${proPriceId}, origin: ${origin}`);
 
     try {
       const sessionOptions: any = {
         payment_method_types: ["card"],
         line_items: [
           {
-            price: priceId,
+            price: proPriceId,
             quantity: 1,
           },
         ],

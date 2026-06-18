@@ -159,7 +159,6 @@ export default async function handler(req: any, res: any) {
       model: 'whisper-1',
       language: 'en',
       responseFormat: 'json',
-      prompt: 'Spiritual conversation in English.',
       temperature: 0,
       filename: audioFilename,
       mimeType,
@@ -170,8 +169,6 @@ export default async function handler(req: any, res: any) {
       model: 'whisper-1',
       language: 'en',
       response_format: 'json',
-      // Neutral prompt reduces conversational hallucinations on non-speech audio
-      prompt: 'Spiritual conversation in English.',
       temperature: 0,
     });
 

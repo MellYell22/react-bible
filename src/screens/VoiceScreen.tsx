@@ -13,7 +13,7 @@ import { Lock, Mic, Send, Sparkles, Square } from 'lucide-react';
 import { generateSpeech, getDavidVoiceResponse, transcribeAudio } from '../services/ai';
 import { useUser } from '../UserContext';
 import { hasProAccess, OWNER_EMAIL } from '../utils/tier';
-import { humanizeForTts, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
+import { prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 import { detectMoodKeyFromMessages } from '../utils/davidMoodContext';
 
 const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
@@ -418,7 +418,7 @@ export default function VoiceScreen() {
     stopCurrentAudio();
 
     try {
-      const preparedText = prepareDavidTtsPayload(humanizeForTts(text), {
+      const preparedText = prepareDavidTtsPayload(text, {
         isGreeting: false,
       }).speechText;
       const audioUrl = await generateSpeech(preparedText, { alreadyPrepared: true });

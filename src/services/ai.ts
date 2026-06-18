@@ -515,6 +515,7 @@ export const generateSpeech = async (
 
   const speechPayload = {
     text: speechText,
+    alreadyPrepared: Boolean(options.alreadyPrepared),
   };
 
   logApiRequest('POST /api/speech', {

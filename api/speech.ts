@@ -25,14 +25,16 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { text } = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+  const { text, alreadyPrepared } = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
 
   if (!text?.trim()) {
     return res.status(400).json({ error: 'Missing text' });
   }
 
   let cleanText = cleanTranscript(text);
-  cleanText = humanizeForTts(cleanText);
+  if (!alreadyPrepared) {
+    cleanText = humanizeForTts(cleanText);
+  }
 
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
