@@ -4,6 +4,7 @@ import { CheckCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useUser } from '../UserContext';
 import { FullScreenBackground } from '../components/FullScreenBackground';
+import { hasProAccess } from '../utils/tier';
 
 export default function PaymentSuccessScreen({ navigation }: { navigation: any }) {
   const { profile, refreshProfile } = useUser();
@@ -37,7 +38,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
 
   useEffect(() => {
     console.log(`[PaymentSuccess] UI Check - Profile: ${profile?.id}, Tier: ${profile?.subscription_tier}, Status: ${profile?.stripe_subscription_status}`);
-    if (profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'owner' || (profile as any)?.subscription_status === 'active') {
+    if (profile && hasProAccess(profile)) {
       console.log('[PaymentSuccess] PRO STATUS DETECTED! Unlocking app features.');
       setIsActivating(false);
       
@@ -47,7 +48,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
       }, 3000);
       return () => clearTimeout(timeout);
     }
-  }, [profile?.subscription_tier]);
+  }, [profile]);
 
   const handleContinue = () => {
     // Redirect to main app entry (Mood)

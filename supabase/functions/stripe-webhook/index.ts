@@ -7,6 +7,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type, stripe-signature",
 };
 
+const getExpectedProPriceId = () =>
+  Deno.env.get("STRIPE_PRICE_ID_PRO") || Deno.env.get("VITE_STRIPE_PRICE_ID_PRO");
+
+const isActivePaidStatus = (status?: string | null) =>
+  status === "active" || status === "trialing";
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -106,34 +112,40 @@ serve(async (req) => {
         }
 
         const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
-        const priceId = lineItems.data[0]?.price?.id;
-        
-        let tier = "free";
-        const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
+        let priceId = lineItems.data[0]?.price?.id;
+        const proPriceId = getExpectedProPriceId();
 
         console.log(`[Stripe Webhook] Price ID from session: ${priceId}, Expected Pro ID: ${proPriceId}`);
 
-        if (priceId === proPriceId) {
-          tier = "pro";
-          console.log("[Stripe Webhook] Tier determined: pro (Matched Price ID)");
-        } else if (!proPriceId && priceId) {
-          console.warn("[Stripe Webhook] WARNING: STRIPE_PRICE_ID_PRO is not set in environment. Defaulting to 'pro' because priceId is present.");
-          tier = "pro";
-        } else {
-          console.log(`[Stripe Webhook] Tier determined: ${tier} (No match)`);
+        if (!proPriceId) {
+          throw new Error("STRIPE_PRICE_ID_PRO is not configured; refusing to grant paid entitlement");
         }
 
         // Get subscription details if available
-        let subscriptionDetails = {};
-        if (subscriptionId) {
-          const sub = await stripe.subscriptions.retrieve(subscriptionId);
-          subscriptionDetails = {
-            stripe_subscription_id: subscriptionId,
-            stripe_subscription_status: sub.status,
-            stripe_price_id: priceId,
-            stripe_current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-          };
+        if (!subscriptionId) {
+          throw new Error(`Checkout session ${session.id} did not include a subscription`);
         }
+
+        let subscriptionDetails = {};
+        let subscriptionStatus: string | undefined;
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
+        subscriptionStatus = sub.status;
+        priceId = sub.items.data[0]?.price?.id || priceId;
+        subscriptionDetails = {
+          stripe_subscription_id: subscriptionId,
+          stripe_subscription_status: sub.status,
+          stripe_price_id: priceId,
+          stripe_current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+        };
+
+        const tier = priceId === proPriceId && isActivePaidStatus(subscriptionStatus) ? "pro" : "free";
+        if (isActivePaidStatus(subscriptionStatus) && priceId !== proPriceId) {
+          throw new Error(`Paid subscription ${subscriptionId} used unexpected price ${priceId || "unknown"}`);
+        }
+        if (tier !== "pro") {
+          throw new Error(`Checkout session ${session.id} did not contain an active Pro subscription`);
+        }
+        console.log(`[Stripe Webhook] Tier determined: ${tier}`);
 
         console.log(`[Stripe Webhook] Performing update for user ${userId} to tier: ${tier}`);
 
@@ -156,12 +168,12 @@ serve(async (req) => {
           console.error(`[Stripe Webhook] Error updating profile for ${userId}:`, error);
           throw error;
         }
-        
+
         if (!data || data.length === 0) {
-          console.warn(`[Stripe Webhook] WARNING: Profile update for ${userId} affected 0 rows. User might not exist in Supabase yet.`);
-        } else {
-          console.log(`[Stripe Webhook] Successfully updated profile for ${userId}. New tier in DB: ${data[0].subscription_tier}`);
+          throw new Error(`Profile update for ${userId} affected 0 rows`);
         }
+
+        console.log(`[Stripe Webhook] Successfully updated profile for ${userId}. New tier in DB: ${data[0].subscription_tier}`);
         break;
       }
 
@@ -176,11 +188,17 @@ serve(async (req) => {
         if (subscriptionId) {
           const subscription = await stripe.subscriptions.retrieve(subscriptionId);
           const priceId = subscription.items.data[0]?.price?.id;
-          
-          let tier = "free";
-          const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
 
-          if (priceId === proPriceId) tier = "pro";
+          const proPriceId = getExpectedProPriceId();
+
+          if (!proPriceId) {
+            throw new Error("STRIPE_PRICE_ID_PRO is not configured; refusing to grant paid entitlement");
+          }
+
+          const tier = priceId === proPriceId && isActivePaidStatus(subscription.status) ? "pro" : "free";
+          if (isActivePaidStatus(subscription.status) && priceId !== proPriceId) {
+            throw new Error(`Paid invoice ${invoice.id} used unexpected price ${priceId || "unknown"}`);
+          }
 
           console.log(`[Stripe Webhook] Updating customer ${customerId} to tier: ${tier}`);
 
@@ -202,12 +220,12 @@ serve(async (req) => {
             console.error(`[Stripe Webhook] Error updating profile for customer ${customerId}:`, error);
             throw error;
           }
-          
+
           if (!data || data.length === 0) {
-            console.warn(`[Stripe Webhook] WARNING: Profile update for customer ${customerId} affected 0 rows. customerId not found.`);
-          } else {
-            console.log(`[Stripe Webhook] Profile update result: SUCCESS for customer ${customerId}. New tier: ${data[0].subscription_tier}`);
+            throw new Error(`Profile update for customer ${customerId} affected 0 rows`);
           }
+
+          console.log(`[Stripe Webhook] Profile update result: SUCCESS for customer ${customerId}. New tier: ${data[0].subscription_tier}`);
         }
         break;
       }
@@ -218,10 +236,16 @@ serve(async (req) => {
         const customerId = subscription.customer as string;
         const priceId = subscription.items.data[0]?.price?.id;
 
-        let tier = "free";
-        const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO");
+        const proPriceId = getExpectedProPriceId();
 
-        if (priceId === proPriceId) tier = "pro";
+        if (!proPriceId) {
+          throw new Error("STRIPE_PRICE_ID_PRO is not configured; refusing to grant paid entitlement");
+        }
+
+        const tier = priceId === proPriceId && isActivePaidStatus(subscription.status) ? "pro" : "free";
+        if (isActivePaidStatus(subscription.status) && priceId !== proPriceId) {
+          throw new Error(`Paid subscription ${subscription.id} used unexpected price ${priceId || "unknown"}`);
+        }
 
         console.log(`[Stripe Webhook] Subscription changed for customer ${customerId}. New tier: ${tier}, Status: ${subscription.status}`);
 
@@ -244,10 +268,10 @@ serve(async (req) => {
         }
 
         if (!data || data.length === 0) {
-          console.warn(`[Stripe Webhook] WARNING: Subscription update for customer ${customerId} affected 0 rows.`);
-        } else {
-          console.log(`[Stripe Webhook] Profile update result: SUCCESS for customer ${customerId} (Subscription ${event.type}). New tier: ${data[0].subscription_tier}`);
+          throw new Error(`Subscription update for customer ${customerId} affected 0 rows`);
         }
+
+        console.log(`[Stripe Webhook] Profile update result: SUCCESS for customer ${customerId} (Subscription ${event.type}). New tier: ${data[0].subscription_tier}`);
         break;
       }
 
@@ -270,7 +294,6 @@ serve(async (req) => {
       }
     }
 
-    // Always return 200 for successful receipt
     return new Response(JSON.stringify({ received: true }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -278,10 +301,8 @@ serve(async (req) => {
 
   } catch (err) {
     console.error(`[Stripe Webhook] Error processing event: ${err.message}`);
-    // We return 200 here to acknowledge receipt, but log the error for debugging.
-    // Stripe will see this as successful and won't disable the webhook endpoint.
     return new Response(JSON.stringify({ received: true, error: err.message }), {
-      status: 200,
+      status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
