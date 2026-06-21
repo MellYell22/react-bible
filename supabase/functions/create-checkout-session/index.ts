@@ -22,16 +22,21 @@ serve(async (req) => {
   }
 
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     console.log("[create-checkout-session] Received body:", JSON.stringify(body));
-    const { priceId } = body;
+    const requestedPriceId = body?.priceId;
+    const priceId = Deno.env.get("STRIPE_PRICE_ID_PRO") || Deno.env.get("VITE_STRIPE_PRICE_ID_PRO");
 
     if (!priceId) {
-      console.error("[create-checkout-session] Error: Missing priceId");
+      console.error("[create-checkout-session] Error: STRIPE_PRICE_ID_PRO is not configured");
       return new Response(
-        JSON.stringify({ error: "Missing priceId" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Server configuration error: Pro price is not configured." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    if (requestedPriceId && requestedPriceId !== priceId) {
+      console.warn(`[create-checkout-session] Ignoring mismatched client price ${requestedPriceId}; using configured Pro price.`);
     }
 
     // Get user strictly from JWT to verify and get identity
