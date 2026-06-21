@@ -1,8 +1,8 @@
 import { supabase } from './supabase';
 
-export const createCheckoutSession = async (priceId: string) => {
-  console.log("Using Stripe Price ID:", priceId);
-  console.log(`[StripeDebug] Initiating upgrade. PriceId: ${priceId}`);
+export const createCheckoutSession = async (priceId?: string | null) => {
+  console.log("Using Stripe Price ID:", priceId || 'server-configured-pro-price');
+  console.log(`[StripeDebug] Initiating upgrade. PriceId: ${priceId || 'server-configured-pro-price'}`);
   
   if (!supabase) {
     throw new Error('Supabase is not configured');
@@ -31,8 +31,8 @@ export const createCheckoutSession = async (priceId: string) => {
       throw new Error('Supabase configuration missing');
     }
 
-    console.log("Using Stripe Price ID:", priceId);
-    console.log("Sending checkout request:", { userId, priceId });
+    console.log("Using Stripe Price ID:", priceId || 'server-configured-pro-price');
+    console.log("Sending checkout request:", { userId, priceId: priceId || 'server-configured-pro-price' });
     
     const response = await fetch(`${supabaseUrl}/functions/v1/create-checkout-session`, {
       method: 'POST',
@@ -41,7 +41,7 @@ export const createCheckoutSession = async (priceId: string) => {
         'Authorization': `Bearer ${session?.access_token || supabaseAnonKey}`,
         'apikey': supabaseAnonKey,
       },
-      body: JSON.stringify({ userId, priceId }),
+      body: JSON.stringify({ userId, ...(priceId ? { priceId } : {}) }),
     });
 
     if (!response.ok) {

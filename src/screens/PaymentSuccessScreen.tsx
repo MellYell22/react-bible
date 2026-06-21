@@ -37,7 +37,7 @@ export default function PaymentSuccessScreen({ navigation }: { navigation: any }
 
   useEffect(() => {
     console.log(`[PaymentSuccess] UI Check - Profile: ${profile?.id}, Tier: ${profile?.subscription_tier}, Status: ${profile?.stripe_subscription_status}`);
-    if (profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'owner' || (profile as any)?.subscription_status === 'active') {
+    if (profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'owner') {
       console.log('[PaymentSuccess] PRO STATUS DETECTED! Unlocking app features.');
       setIsActivating(false);
       
