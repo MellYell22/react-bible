@@ -93,9 +93,10 @@ serve(async (req) => {
       httpClient: Stripe.createFetchHttpClient(),
     });
 
-    // Get origin for success/cancel URLs
+    // Get origin for success/cancel URLs. Always return to the SPA root so React can catch the payment params.
     const origin = req.headers.get("origin") || Deno.env.get("APP_URL") || "http://localhost:3000";
-    console.log(`[create-checkout-session] Creating session for user: ${userId}, price: ${priceId}, origin: ${origin}`);
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    console.log(`[create-checkout-session] Creating session for user: ${userId}, price: ${priceId}, origin: ${normalizedOrigin}`);
 
     try {
       const sessionOptions: any = {
@@ -113,8 +114,8 @@ serve(async (req) => {
             user_id: userId,
           },
         },
-        success_url: `${origin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}/pricing`,
+        success_url: `${normalizedOrigin}/?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${normalizedOrigin}/?canceled=true&showPricing=true`,
         client_reference_id: userId,
         metadata: {
           userId,
