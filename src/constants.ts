@@ -19,7 +19,7 @@ export const PLANS = {
     name: 'Pro',
     price: '$9.99',
     interval: 'mo',
-    priceId: import.meta.env.VITE_STRIPE_PRICE_ID_PRO,
+    priceId: import.meta.env.VITE_STRIPE_PRICE_ID_PRO || 'price_1TRTQuGDw0P2L0A1MsgZiMeM',
     features: [
       'Unlimited AI chat with David',
       'Live voice chat with David',
