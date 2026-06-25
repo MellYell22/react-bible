@@ -12,6 +12,8 @@ import { Lock, Mic, Send, Sparkles, Square } from 'lucide-react';
 
 import { generateSpeech, getDavidVoiceResponse, transcribeAudio } from '../services/ai';
 import { useUser } from '../UserContext';
+import { createCheckoutSession } from '../services/stripe';
+import { PLANS } from '../constants';
 import { hasProAccess, OWNER_EMAIL } from '../utils/tier';
 import { humanizeForTts, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 import { detectMoodKeyFromMessages } from '../utils/davidMoodContext';
@@ -131,6 +133,7 @@ export default function VoiceScreen() {
   const [lastResponseText, setLastResponseText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [voiceLevels, setVoiceLevels] = useState<number[]>(IDLE_VOICE_LEVELS);
+  const [upgradeLoading, setUpgradeLoading] = useState(false);
 
   const phaseRef = useRef<ScreenPhase>('checking');
   const messagesRef = useRef<ChatTurn[]>([]);
@@ -368,34 +371,33 @@ export default function VoiceScreen() {
         voiceLevelsRef.current = nextLevels;
         setVoiceLevels(nextLevels);
 
-        if (options.monitorSilence && options.conversationId && options.listenSessionId) {
-          const recorder = mediaRecorderRef.current;
-          const isStillCurrent =
-            conversationActiveRef.current &&
-            conversationIdRef.current === options.conversationId &&
-            listenSessionIdRef.current === options.listenSessionId &&
-            recorder?.state === 'recording';
+        if (options.monitorSilence && conversationActiveRef.current) {
+          if (normalizedVolume >= SPEECH_VOLUME_THRESHOLD) {
+            speechDetectedRef.current = true;
+            lastSpeechAtRef.current = now;
+          }
 
-          if (isStillCurrent) {
-            if (normalizedVolume >= SPEECH_VOLUME_THRESHOLD) {
-              speechDetectedRef.current = true;
-              lastSpeechAtRef.current = now;
-            }
+          const elapsed = now - recordingStartedAtRef.current;
+          const silenceElapsed = lastSpeechAtRef.current ? now - lastSpeechAtRef.current : 0;
+          const localConversationId = options.conversationId ?? conversationIdRef.current;
+          const localListenSessionId = options.listenSessionId ?? listenSessionIdRef.current;
 
-            const startedAt = recordingStartedAtRef.current || now;
-            const hasRecordingMinimum = now - startedAt >= MIN_RECORDING_MS;
-            const silenceHasSettled =
+          if (
+            !autoStopTriggeredRef.current &&
+            mediaRecorderRef.current?.state === 'recording' &&
+            isCurrentConversation(localConversationId) &&
+            listenSessionIdRef.current === localListenSessionId
+          ) {
+            const shouldAutoStopForSilence =
               speechDetectedRef.current &&
-              lastSpeechAtRef.current !== null &&
-              now - lastSpeechAtRef.current >= SILENCE_STOP_MS;
-            const hitHardMaximum = speechDetectedRef.current && now - startedAt >= HARD_MAX_RECORDING_MS;
+              elapsed >= MIN_RECORDING_MS &&
+              silenceElapsed >= SILENCE_STOP_MS;
 
-            if (
-              !autoStopTriggeredRef.current &&
-              hasRecordingMinimum &&
-              (silenceHasSettled || hitHardMaximum)
-            ) {
+            const shouldAutoStopForHardLimit = elapsed >= HARD_MAX_RECORDING_MS;
+
+            if (shouldAutoStopForSilence || shouldAutoStopForHardLimit) {
               autoStopTriggeredRef.current = true;
+              setPhase('transcribing');
               stopListening(false);
               return;
             }
@@ -411,29 +413,6 @@ export default function VoiceScreen() {
     }
   };
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      conversationActiveRef.current = false;
-      conversationIdRef.current += 1;
-      requestIdRef.current += 1;
-      listenSessionIdRef.current += 1;
-      processingRef.current = false;
-      abortPendingRequests();
-      stopListening(true);
-      stopVoiceActivity();
-      stopCurrentAudio();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (userContextLoading) return;
-    if (!hasVoiceAccess) return;
-
-    setPhase(currentPhase => currentPhase === 'checking' ? 'idle' : currentPhase);
-  }, [hasVoiceAccess, userContextLoading]);
-
   const getRecordingMimeType = () => {
     if (typeof MediaRecorder === 'undefined') return '';
 
@@ -448,8 +427,12 @@ export default function VoiceScreen() {
     return '';
   };
 
-  const startListening = async (conversationId = conversationIdRef.current) => {
-    if (!isCurrentConversation(conversationId)) return;
+  const startListening = async (options: { conversationId?: number } = {}) => {
+    const localConversationId = options.conversationId ?? conversationIdRef.current;
+
+    if (!isCurrentConversation(localConversationId)) {
+      return;
+    }
 
     if (Platform.OS !== 'web') {
       setError('Microphone input is available in the web preview.');
@@ -458,34 +441,34 @@ export default function VoiceScreen() {
     }
 
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError('This browser does not support microphone recording. Use Chrome, Edge, or Safari and allow microphone access.');
+      setError('This browser does not support microphone recording. Use Chrome or Edge and allow microphone access.');
       setPhase('error');
       return;
     }
 
+    abortPendingRequests();
     stopCurrentAudio();
-    stopListening(true);
     setError(null);
     setPhase('starting');
     startSyntheticVoiceActivity();
 
-    const listenSessionId = listenSessionIdRef.current + 1;
-    listenSessionIdRef.current = listenSessionId;
-
     let pendingStream: MediaStream | null = null;
+    const localListenSessionId = listenSessionIdRef.current + 1;
+    listenSessionIdRef.current = localListenSessionId;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       pendingStream = stream;
 
-      if (!isCurrentConversation(conversationId) || listenSessionIdRef.current !== listenSessionId) {
-        pendingStream.getTracks().forEach(track => track.stop());
+      if (!isCurrentConversation(localConversationId) || listenSessionIdRef.current !== localListenSessionId) {
+        stream.getTracks().forEach(track => track.stop());
         return;
       }
 
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-
       pendingStream = null;
+
       audioChunksRef.current = [];
       discardRecordingRef.current = false;
       recordingMimeTypeRef.current = mimeType || recorder.mimeType || 'audio/webm';
@@ -498,8 +481,8 @@ export default function VoiceScreen() {
 
       startVoiceActivity(stream, {
         monitorSilence: true,
-        conversationId,
-        listenSessionId,
+        conversationId: localConversationId,
+        listenSessionId: localListenSessionId,
       });
 
       recorder.ondataavailable = event => {
@@ -511,40 +494,35 @@ export default function VoiceScreen() {
       recorder.onerror = () => {
         if (!mountedRef.current) return;
         stopVoiceActivity();
-        if (isCurrentConversation(conversationId)) {
-          setError('David had trouble accessing the microphone. Allow microphone access, then try again.');
-          setPhase('error');
-        }
+        setError('David had trouble accessing the microphone. Allow microphone access for this site, then try again.');
+        setPhase('error');
       };
 
       recorder.onstop = async () => {
         const chunks = audioChunksRef.current;
-        const shouldDiscard = discardRecordingRef.current;
         audioChunksRef.current = [];
-        discardRecordingRef.current = false;
-
         mediaStreamRef.current?.getTracks().forEach(track => track.stop());
         mediaStreamRef.current = null;
         mediaRecorderRef.current = null;
+        stopVoiceActivity();
 
-        if (
-          shouldDiscard ||
-          !isCurrentConversation(conversationId) ||
-          listenSessionIdRef.current !== listenSessionId
-        ) {
+        if (!mountedRef.current || discardRecordingRef.current) {
+          discardRecordingRef.current = false;
           return;
         }
 
-        if (!chunks.length || !speechDetectedRef.current) {
-          if (isCurrentConversation(conversationId)) {
-            setError("David couldn't hear enough audio yet. Try speaking a little closer to the microphone.");
-            void startListening(conversationId);
-          }
+        if (!isCurrentConversation(localConversationId) || listenSessionIdRef.current !== localListenSessionId) {
+          return;
+        }
+
+        if (!chunks.length) {
+          setError("David couldn't hear enough audio. Try speaking again.");
+          setPhase('listening');
+          void startListening({ conversationId: localConversationId });
           return;
         }
 
         setPhase('transcribing');
-
         const transcribeController = new AbortController();
         transcribeAbortControllerRef.current?.abort();
         transcribeAbortControllerRef.current = transcribeController;
@@ -561,32 +539,30 @@ export default function VoiceScreen() {
             clearAbortController(transcribeAbortControllerRef);
           }
 
-          if (!isCurrentConversation(conversationId) || listenSessionIdRef.current !== listenSessionId) {
+          if (!isCurrentConversation(localConversationId) || listenSessionIdRef.current !== localListenSessionId) {
             return;
           }
 
           const transcript = normalizeTranscript(result.transcript);
-
-          console.log('[David Voice] Final transcript accepted for review:', transcript);
-
-          if (!transcript || result.rejected || !isMeaningfulUserText(transcript)) {
+          if (!isMeaningfulUserText(transcript)) {
             const reason = result.reason === 'audio_too_small'
-              ? 'Try holding the mic a little longer before pausing.'
-              : 'Try speaking a little closer to the microphone.';
-            setError(`David couldn't catch that. ${reason}`);
-            void startListening(conversationId);
+              ? 'Try speaking a little longer before stopping.'
+              : 'David could not catch enough words yet. Try again.';
+            setError(reason);
+            setPhase('listening');
+            void startListening({ conversationId: localConversationId });
             return;
           }
 
-          setTextInput('');
+          setTextInput(transcript);
           await submitUserText(transcript, {
-            conversationId,
+            conversationId: localConversationId,
             resumeListening: true,
           });
         } catch (err: any) {
           if (err?.name === 'AbortError') return;
           if (!mountedRef.current) return;
-          if (!isCurrentConversation(conversationId)) return;
+          if (!isCurrentConversation(localConversationId)) return;
 
           setError(err?.message || "David couldn't transcribe that audio.");
           setPhase('error');
@@ -598,20 +574,15 @@ export default function VoiceScreen() {
       };
 
       recorder.start();
-      if (isCurrentConversation(conversationId) && listenSessionIdRef.current === listenSessionId) {
-        setPhase('listening');
-      }
+      setPhase('listening');
     } catch (err: any) {
       if (!mountedRef.current) return;
       pendingStream?.getTracks().forEach(track => track.stop());
       stopVoiceActivity();
-
-      if (!isCurrentConversation(conversationId)) return;
-
       const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
       setError(
         denied
-          ? 'Microphone access is blocked. Allow microphone access for this site, then tap Start Conversation again.'
+          ? 'Microphone access is blocked for this site. Allow microphone access and try again.'
           : 'David could not start listening. Check that your microphone is available.',
       );
       setPhase('error');
@@ -622,35 +593,33 @@ export default function VoiceScreen() {
     text: string,
     options: PlayDavidAudioOptions,
   ) => {
-    const cleanText = text.trim();
-
-    if (!cleanText) {
+    if (!text.trim()) {
       if (options.resumeListening && isCurrentConversation(options.conversationId, options.requestId)) {
-        await startListening(options.conversationId);
+        void startListening({ conversationId: options.conversationId });
       } else if (isCurrentConversation(options.conversationId, options.requestId)) {
         setPhase('idle');
       }
       return;
     }
 
-    if (!isCurrentConversation(options.conversationId, options.requestId)) return;
+    if (!isCurrentConversation(options.conversationId, options.requestId)) {
+      return;
+    }
 
-    setPhase('speaking');
     stopListening(true);
     stopCurrentAudio();
-    startSyntheticVoiceActivity();
+    setPhase(options.isGreeting ? 'greeting' : 'speaking');
 
     const speechController = new AbortController();
     speechAbortControllerRef.current?.abort();
     speechAbortControllerRef.current = speechController;
 
     try {
-      const preparedText = prepareDavidTtsPayload(humanizeForTts(cleanText), {
-        isGreeting: Boolean(options.isGreeting),
+      const preparedText = prepareDavidTtsPayload(humanizeForTts(text), {
+        isGreeting: options.isGreeting,
       }).speechText;
       const audioUrl = await generateSpeech(preparedText, {
         alreadyPrepared: true,
-        isGreeting: Boolean(options.isGreeting),
         signal: speechController.signal,
       });
 
@@ -659,70 +628,29 @@ export default function VoiceScreen() {
       }
 
       if (!isCurrentConversation(options.conversationId, options.requestId)) {
-        if (audioUrl) {
-          try {
-            URL.revokeObjectURL(audioUrl);
-          } catch {
-            // Ignore revoke errors.
-          }
-        }
         return;
       }
 
       if (!audioUrl || Platform.OS !== 'web') {
-        setError("David's text response is ready, but the voice audio could not be generated right now.");
-        stopVoiceActivity();
-
-        if (options.resumeListening && isCurrentConversation(options.conversationId, options.requestId)) {
-          await startListening(options.conversationId);
-        } else if (isCurrentConversation(options.conversationId, options.requestId)) {
-          setPhase('idle');
+        if (options.resumeListening) {
+          setPhase('listening');
+          void startListening({ conversationId: options.conversationId });
+          return;
         }
+        setPhase('idle');
         return;
       }
 
-      const audioResult = await new Promise<'ended' | 'stopped'>((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const audio = new Audio(audioUrl);
-        currentAudioRef.current = audio;
-        currentAudioUrlRef.current = audioUrl;
-        audio.preload = 'auto';
         let finished = false;
 
-        const finish = (result: 'ended' | 'stopped') => {
+        const finish = () => {
           if (finished) return;
           finished = true;
 
-          if (currentAudioRef.current === audio) {
-            currentAudioRef.current = null;
-          }
-          if (currentAudioUrlRef.current === audioUrl) {
-            currentAudioUrlRef.current = null;
-          }
-          if (audioStopResolverRef.current) {
-            audioStopResolverRef.current = null;
-          }
-
-          try {
-            URL.revokeObjectURL(audioUrl);
-          } catch {
-            // Ignore revoke errors.
-          }
-
-          resolve(result);
-        };
-
-        audioStopResolverRef.current = () => finish('stopped');
-        audio.onended = () => finish('ended');
-        audio.onerror = () => {
-          if (finished) return;
-          finished = true;
-
-          if (currentAudioRef.current === audio) {
-            currentAudioRef.current = null;
-          }
-          if (currentAudioUrlRef.current === audioUrl) {
-            currentAudioUrlRef.current = null;
-          }
+          currentAudioRef.current = null;
+          currentAudioUrlRef.current = null;
           audioStopResolverRef.current = null;
 
           try {
@@ -731,16 +659,29 @@ export default function VoiceScreen() {
             // Ignore revoke errors.
           }
 
+          resolve();
+        };
+
+        currentAudioRef.current = audio;
+        currentAudioUrlRef.current = audioUrl;
+        audioStopResolverRef.current = finish;
+        audio.preload = 'auto';
+        audio.onended = finish;
+        audio.onerror = () => {
+          finish();
           reject(new Error("David's voice audio was returned, but the browser could not play it."));
         };
         audio.play().catch(reject);
       });
 
-      stopVoiceActivity();
+      if (!isCurrentConversation(options.conversationId, options.requestId)) {
+        return;
+      }
 
-      if (audioResult === 'ended' && options.resumeListening && isCurrentConversation(options.conversationId, options.requestId)) {
-        await startListening(options.conversationId);
-      } else if (audioResult === 'ended' && isCurrentConversation(options.conversationId, options.requestId)) {
+      if (options.resumeListening) {
+        setPhase('listening');
+        void startListening({ conversationId: options.conversationId });
+      } else {
         setPhase('idle');
       }
     } catch (err: any) {
@@ -748,7 +689,6 @@ export default function VoiceScreen() {
       if (!mountedRef.current) return;
       if (!isCurrentConversation(options.conversationId, options.requestId)) return;
 
-      stopVoiceActivity();
       setError(err?.message || 'David had trouble speaking that response.');
       setPhase('error');
     } finally {
@@ -757,6 +697,29 @@ export default function VoiceScreen() {
       }
     }
   };
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      conversationActiveRef.current = false;
+      abortPendingRequests();
+      stopListening(true);
+      stopVoiceActivity();
+      stopCurrentAudio();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (userContextLoading) return;
+    if (hasVoiceAccess) {
+      setPhase(current => (current === 'checking' ? 'idle' : current));
+      return;
+    }
+
+    setPhase('idle');
+  }, [hasVoiceAccess, userContextLoading]);
 
   const submitUserText = async (
     rawText: string,
@@ -920,6 +883,32 @@ export default function VoiceScreen() {
     setPhase('ended');
   };
 
+  const handleUpgradeToPro = async () => {
+    if (upgradeLoading) return;
+
+    setError(null);
+
+    const priceId = PLANS.PRO.priceId;
+    if (!priceId) {
+      setError('Pro checkout is not configured yet.');
+      return;
+    }
+
+    if (!session?.user) {
+      setError('Please sign in from the Profile tab before upgrading to Pro.');
+      return;
+    }
+
+    try {
+      setUpgradeLoading(true);
+      await createCheckoutSession(priceId);
+    } catch (err: any) {
+      setError(err?.message || 'Unable to start checkout right now.');
+    } finally {
+      setUpgradeLoading(false);
+    }
+  };
+
   const handleTextSubmit = async () => {
     const manualText = textInput;
 
@@ -953,6 +942,27 @@ export default function VoiceScreen() {
           <Text style={styles.lockText}>
             Voice with David is available for Pro users.
           </Text>
+          <TouchableOpacity
+            style={[
+              styles.lockUpgradeButton,
+              upgradeLoading && styles.lockUpgradeButtonDisabled,
+            ]}
+            onPress={handleUpgradeToPro}
+            disabled={upgradeLoading}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Upgrade to Pro"
+          >
+            <Text style={styles.lockUpgradeButtonText}>
+              {upgradeLoading ? 'Starting checkout...' : 'Upgrade to Pro'}
+            </Text>
+          </TouchableOpacity>
+          <Text style={styles.lockUpgradeHint}>Unlock live voice chat with David.</Text>
+          {error && (
+            <View style={styles.lockErrorBanner}>
+              <Text style={styles.lockErrorText}>{error}</Text>
+            </View>
+          )}
         </View>
       </View>
     );
@@ -1201,6 +1211,50 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: '#f5d77a',
+    textAlign: 'center',
+  },
+  lockUpgradeButton: {
+    marginTop: 20,
+    minHeight: 52,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    backgroundColor: '#d4af37',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 215, 122, 0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  lockUpgradeButtonDisabled: {
+    opacity: 0.6,
+  },
+  lockUpgradeButtonText: {
+    color: '#0b1e3d',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  lockUpgradeHint: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 20,
+    color: 'rgba(245, 215, 122, 0.78)',
+    textAlign: 'center',
+  },
+  lockErrorBanner: {
+    width: '100%',
+    marginTop: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(127, 29, 29, 0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.4)',
+  },
+  lockErrorText: {
+    color: '#fecaca',
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: 'center',
   },
   header: {
