@@ -19,13 +19,42 @@ type RouteState = {
   params?: Record<string, any>;
 };
 
+const getInitialRoute = (): RouteState => {
+  if (typeof window === 'undefined') {
+    return { name: 'Home' };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const isStripeSuccess = params.get('success') === 'true' || params.has('session_id') || window.location.pathname.includes('payment-success');
+  const isStripeCanceled = params.get('canceled') === 'true' || window.location.pathname.includes('pricing');
+
+  if (isStripeSuccess || isStripeCanceled) {
+    return {
+      name: 'Profile',
+      params: {
+        success: isStripeSuccess,
+        paymentSuccess: isStripeSuccess,
+        canceled: isStripeCanceled,
+        showPricing: true,
+        sessionId: params.get('session_id') || undefined,
+      },
+    };
+  }
+
+  return { name: 'Home' };
+};
+
 function AppShell() {
   const { session, profile, loading } = useUser();
-  const [route, setRoute] = useState<RouteState>({ name: 'Home' });
+  const [route, setRoute] = useState<RouteState>(() => getInitialRoute());
 
   const navigation = useMemo(() => ({
     navigate: (name: AppRoute, params?: Record<string, any>) => setRoute({ name, params }),
     goBack: () => setRoute({ name: 'Home' }),
+    setParams: (params?: Record<string, any>) => setRoute((current) => ({
+      ...current,
+      params: { ...(current.params || {}), ...(params || {}) },
+    })),
   }), []);
 
   if (loading) {
