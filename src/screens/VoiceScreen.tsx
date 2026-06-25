@@ -15,13 +15,20 @@ import { useUser } from '../UserContext';
 import { hasProAccess, OWNER_EMAIL } from '../utils/tier';
 import { humanizeForTts, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 import { detectMoodKeyFromMessages } from '../utils/davidMoodContext';
+import { getVoiceSessionGreeting } from '../constants/persona';
 
 const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
 
+const SPEECH_VOLUME_THRESHOLD = 0.11;
+const SILENCE_STOP_MS = 1100;
+const MIN_RECORDING_MS = 850;
+const HARD_MAX_RECORDING_MS = 45000;
+
 type ScreenPhase =
   | 'checking'
-  | 'ready'
+  | 'idle'
   | 'ended'
+  | 'greeting'
   | 'starting'
   | 'listening'
   | 'transcribing'
@@ -32,6 +39,13 @@ type ScreenPhase =
 type ChatTurn = {
   role: 'user' | 'assistant';
   content: string;
+};
+
+type PlayDavidAudioOptions = {
+  conversationId: number;
+  requestId?: number;
+  isGreeting?: boolean;
+  resumeListening?: boolean;
 };
 
 const cleanVerseMarker = (text: string): string =>
@@ -87,17 +101,48 @@ const updateUsedVerseForMood = (input: {
   });
 };
 
+const normalizeTranscript = (value: string): string =>
+  value.replace(/\s+/g, ' ').trim();
+
+const isMeaningfulUserText = (value: string): boolean => {
+  const text = normalizeTranscript(value);
+  if (!text) return false;
+
+  const lowered = text.toLowerCase();
+  const junkPatterns = [
+    /^[\s.…,!?*-]+$/,
+    /^(okay|ok|um+|uh+|hmm+|mm+|mhm+|ah+|oh+|bye|goodbye)[.!?\s]*$/i,
+    /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
+  ];
+
+  if (junkPatterns.some(pattern => pattern.test(lowered))) return false;
+
+  const words = text.split(/\s+/).filter(Boolean);
+  const letters = text.replace(/[^a-zA-Z]/g, '');
+  return words.length >= 2 && letters.length >= 4;
+};
+
 export default function VoiceScreen() {
   const { profile, session, loading: userContextLoading } = useUser();
 
-  const [phase, setPhase] = useState<ScreenPhase>('checking');
+  const [phase, setPhaseState] = useState<ScreenPhase>('checking');
   const [textInput, setTextInput] = useState('');
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [lastResponseText, setLastResponseText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [voiceLevels, setVoiceLevels] = useState<number[]>(IDLE_VOICE_LEVELS);
 
+  const phaseRef = useRef<ScreenPhase>('checking');
+  const messagesRef = useRef<ChatTurn[]>([]);
+  const conversationActiveRef = useRef(false);
+  const conversationIdRef = useRef(0);
+  const requestIdRef = useRef(0);
+  const listenSessionIdRef = useRef(0);
+  const processingRef = useRef(false);
+
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
+  const audioStopResolverRef = useRef<(() => void) | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
@@ -109,40 +154,83 @@ export default function VoiceScreen() {
   const voiceLevelsRef = useRef<number[]>(IDLE_VOICE_LEVELS);
   const mountedRef = useRef(true);
 
+  const recordingStartedAtRef = useRef(0);
+  const speechDetectedRef = useRef(false);
+  const lastSpeechAtRef = useRef<number | null>(null);
+  const autoStopTriggeredRef = useRef(false);
+
+  const transcribeAbortControllerRef = useRef<AbortController | null>(null);
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
+  const speechAbortControllerRef = useRef<AbortController | null>(null);
+
   const hasVoiceAccess = useMemo(() => {
     if (profile && hasProAccess(profile)) return true;
     const email = session?.user?.email?.toLowerCase();
     return email === OWNER_EMAIL.toLowerCase();
   }, [profile, session?.user?.email]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      stopListening(true);
-      stopVoiceActivity();
-      stopCurrentAudio();
-    };
-  }, []);
+  const setPhase = (next: ScreenPhase | ((current: ScreenPhase) => ScreenPhase)) => {
+    const resolved = typeof next === 'function' ? next(phaseRef.current) : next;
+    phaseRef.current = resolved;
+    setPhaseState(resolved);
+  };
 
-  useEffect(() => {
-    if (userContextLoading) return;
-    if (!hasVoiceAccess) return;
+  const commitMessages = (nextMessages: ChatTurn[]) => {
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+  };
 
-    setPhase(currentPhase => currentPhase === 'checking' ? 'ready' : currentPhase);
-  }, [hasVoiceAccess, userContextLoading]);
+  const isCurrentConversation = (conversationId: number, requestId?: number): boolean => {
+    if (!mountedRef.current) return false;
+    if (!conversationActiveRef.current) return false;
+    if (conversationIdRef.current !== conversationId) return false;
+    if (requestId !== undefined && requestIdRef.current !== requestId) return false;
+    return true;
+  };
+
+  const clearAbortController = (ref: React.MutableRefObject<AbortController | null>) => {
+    ref.current = null;
+  };
+
+  const abortPendingRequests = () => {
+    transcribeAbortControllerRef.current?.abort();
+    chatAbortControllerRef.current?.abort();
+    speechAbortControllerRef.current?.abort();
+
+    transcribeAbortControllerRef.current = null;
+    chatAbortControllerRef.current = null;
+    speechAbortControllerRef.current = null;
+  };
 
   const stopCurrentAudio = () => {
+    const audio = currentAudioRef.current;
+    const stopResolver = audioStopResolverRef.current;
+    const audioUrl = currentAudioUrlRef.current;
+
+    currentAudioRef.current = null;
+    audioStopResolverRef.current = null;
+    currentAudioUrlRef.current = null;
+
     try {
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-        currentAudioRef.current.currentTime = 0;
+      if (audio) {
+        audio.onended = null;
+        audio.onerror = null;
+        audio.pause();
+        audio.currentTime = 0;
       }
     } catch {
       // Ignore browser audio cleanup errors.
-    } finally {
-      currentAudioRef.current = null;
     }
+
+    try {
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    } catch {
+      // Ignore revoke errors.
+    }
+
+    stopResolver?.();
   };
 
   const stopVoiceActivity = () => {
@@ -188,7 +276,39 @@ export default function VoiceScreen() {
     tick();
   };
 
-  const startVoiceActivity = (stream: MediaStream) => {
+  const stopListening = (discard = false) => {
+    const recorder = mediaRecorderRef.current;
+
+    if (recorder && recorder.state !== 'inactive') {
+      discardRecordingRef.current = discard;
+      if (discard) audioChunksRef.current = [];
+      autoStopTriggeredRef.current = true;
+      stopVoiceActivity();
+
+      try {
+        recorder.stop();
+      } catch {
+        mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+      }
+      return;
+    }
+
+    stopVoiceActivity();
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+    mediaStreamRef.current = null;
+    mediaRecorderRef.current = null;
+  };
+
+  const startVoiceActivity = (
+    stream: MediaStream,
+    options: {
+      monitorSilence?: boolean;
+      conversationId?: number;
+      listenSessionId?: number;
+    } = {},
+  ) => {
     stopVoiceActivity();
 
     try {
@@ -247,6 +367,41 @@ export default function VoiceScreen() {
 
         voiceLevelsRef.current = nextLevels;
         setVoiceLevels(nextLevels);
+
+        if (options.monitorSilence && options.conversationId && options.listenSessionId) {
+          const recorder = mediaRecorderRef.current;
+          const isStillCurrent =
+            conversationActiveRef.current &&
+            conversationIdRef.current === options.conversationId &&
+            listenSessionIdRef.current === options.listenSessionId &&
+            recorder?.state === 'recording';
+
+          if (isStillCurrent) {
+            if (normalizedVolume >= SPEECH_VOLUME_THRESHOLD) {
+              speechDetectedRef.current = true;
+              lastSpeechAtRef.current = now;
+            }
+
+            const startedAt = recordingStartedAtRef.current || now;
+            const hasRecordingMinimum = now - startedAt >= MIN_RECORDING_MS;
+            const silenceHasSettled =
+              speechDetectedRef.current &&
+              lastSpeechAtRef.current !== null &&
+              now - lastSpeechAtRef.current >= SILENCE_STOP_MS;
+            const hitHardMaximum = speechDetectedRef.current && now - startedAt >= HARD_MAX_RECORDING_MS;
+
+            if (
+              !autoStopTriggeredRef.current &&
+              hasRecordingMinimum &&
+              (silenceHasSettled || hitHardMaximum)
+            ) {
+              autoStopTriggeredRef.current = true;
+              stopListening(false);
+              return;
+            }
+          }
+        }
+
         voiceActivityFrameRef.current = requestAnimationFrame(tick);
       };
 
@@ -256,22 +411,28 @@ export default function VoiceScreen() {
     }
   };
 
-  const stopListening = (discard = false) => {
-    const recorder = mediaRecorderRef.current;
-
-    if (recorder && recorder.state !== 'inactive') {
-      discardRecordingRef.current = discard;
-      if (discard) audioChunksRef.current = [];
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      conversationActiveRef.current = false;
+      conversationIdRef.current += 1;
+      requestIdRef.current += 1;
+      listenSessionIdRef.current += 1;
+      processingRef.current = false;
+      abortPendingRequests();
+      stopListening(true);
       stopVoiceActivity();
-      recorder.stop();
-      return;
-    }
+      stopCurrentAudio();
+    };
+  }, []);
 
-    stopVoiceActivity();
-    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
-    mediaStreamRef.current = null;
-    mediaRecorderRef.current = null;
-  };
+  useEffect(() => {
+    if (userContextLoading) return;
+    if (!hasVoiceAccess) return;
+
+    setPhase(currentPhase => currentPhase === 'checking' ? 'idle' : currentPhase);
+  }, [hasVoiceAccess, userContextLoading]);
 
   const getRecordingMimeType = () => {
     if (typeof MediaRecorder === 'undefined') return '';
@@ -287,36 +448,59 @@ export default function VoiceScreen() {
     return '';
   };
 
-  const startListening = async () => {
+  const startListening = async (conversationId = conversationIdRef.current) => {
+    if (!isCurrentConversation(conversationId)) return;
+
     if (Platform.OS !== 'web') {
       setError('Microphone input is available in the web preview.');
+      setPhase('error');
       return;
     }
 
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError('This browser does not support microphone recording. Use Chrome or Edge and allow microphone access.');
+      setError('This browser does not support microphone recording. Use Chrome, Edge, or Safari and allow microphone access.');
+      setPhase('error');
       return;
     }
 
     stopCurrentAudio();
+    stopListening(true);
     setError(null);
     setPhase('starting');
     startSyntheticVoiceActivity();
+
+    const listenSessionId = listenSessionIdRef.current + 1;
+    listenSessionIdRef.current = listenSessionId;
 
     let pendingStream: MediaStream | null = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       pendingStream = stream;
+
+      if (!isCurrentConversation(conversationId) || listenSessionIdRef.current !== listenSessionId) {
+        pendingStream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      startVoiceActivity(stream);
-      pendingStream = null;
 
+      pendingStream = null;
       audioChunksRef.current = [];
       discardRecordingRef.current = false;
       recordingMimeTypeRef.current = mimeType || recorder.mimeType || 'audio/webm';
       mediaStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
+      recordingStartedAtRef.current = performance.now();
+      speechDetectedRef.current = false;
+      lastSpeechAtRef.current = null;
+      autoStopTriggeredRef.current = false;
+
+      startVoiceActivity(stream, {
+        monitorSilence: true,
+        conversationId,
+        listenSessionId,
+      });
 
       recorder.ondataavailable = event => {
         if (event.data.size > 0) {
@@ -327,173 +511,315 @@ export default function VoiceScreen() {
       recorder.onerror = () => {
         if (!mountedRef.current) return;
         stopVoiceActivity();
-        setError('David had trouble accessing the microphone. Allow microphone access for localhost, then try again.');
-        setPhase('ready');
+        if (isCurrentConversation(conversationId)) {
+          setError('David had trouble accessing the microphone. Allow microphone access, then try again.');
+          setPhase('error');
+        }
       };
 
       recorder.onstop = async () => {
         const chunks = audioChunksRef.current;
+        const shouldDiscard = discardRecordingRef.current;
         audioChunksRef.current = [];
+        discardRecordingRef.current = false;
+
         mediaStreamRef.current?.getTracks().forEach(track => track.stop());
         mediaStreamRef.current = null;
         mediaRecorderRef.current = null;
 
-        if (!mountedRef.current || !chunks.length) {
-          if (mountedRef.current && !discardRecordingRef.current) {
-            setError("David couldn't hear enough audio. Try holding the mic a little longer.");
-            setPhase('ready');
-          }
+        if (
+          shouldDiscard ||
+          !isCurrentConversation(conversationId) ||
+          listenSessionIdRef.current !== listenSessionId
+        ) {
           return;
         }
 
-        if (discardRecordingRef.current) {
-          discardRecordingRef.current = false;
+        if (!chunks.length || !speechDetectedRef.current) {
+          if (isCurrentConversation(conversationId)) {
+            setError("David couldn't hear enough audio yet. Try speaking a little closer to the microphone.");
+            void startListening(conversationId);
+          }
           return;
         }
 
         setPhase('transcribing');
 
+        const transcribeController = new AbortController();
+        transcribeAbortControllerRef.current?.abort();
+        transcribeAbortControllerRef.current = transcribeController;
+
         try {
           const audioBlob = new Blob(chunks, {
             type: recordingMimeTypeRef.current || 'audio/webm',
           });
-          const result = await transcribeAudio(audioBlob);
-          const transcript = result.transcript.trim();
+          const result = await transcribeAudio(audioBlob, {
+            signal: transcribeController.signal,
+          });
 
-          if (!transcript) {
-            const reason = result.reason === 'audio_too_small'
-              ? 'Try holding the mic a little longer before tapping stop.'
-              : 'Try speaking a little closer to the microphone.';
-            setError(`David couldn't catch that. ${reason}`);
-            setPhase('ready');
+          if (transcribeAbortControllerRef.current === transcribeController) {
+            clearAbortController(transcribeAbortControllerRef);
+          }
+
+          if (!isCurrentConversation(conversationId) || listenSessionIdRef.current !== listenSessionId) {
             return;
           }
 
-          setTextInput(transcript);
-          await submitUserText(transcript);
+          const transcript = normalizeTranscript(result.transcript);
+
+          console.log('[David Voice] Final transcript accepted for review:', transcript);
+
+          if (!transcript || result.rejected || !isMeaningfulUserText(transcript)) {
+            const reason = result.reason === 'audio_too_small'
+              ? 'Try holding the mic a little longer before pausing.'
+              : 'Try speaking a little closer to the microphone.';
+            setError(`David couldn't catch that. ${reason}`);
+            void startListening(conversationId);
+            return;
+          }
+
+          setTextInput('');
+          await submitUserText(transcript, {
+            conversationId,
+            resumeListening: true,
+          });
         } catch (err: any) {
+          if (err?.name === 'AbortError') return;
           if (!mountedRef.current) return;
+          if (!isCurrentConversation(conversationId)) return;
+
           setError(err?.message || "David couldn't transcribe that audio.");
-          setPhase('ready');
+          setPhase('error');
+        } finally {
+          if (transcribeAbortControllerRef.current === transcribeController) {
+            clearAbortController(transcribeAbortControllerRef);
+          }
         }
       };
 
       recorder.start();
-      setPhase('listening');
+      if (isCurrentConversation(conversationId) && listenSessionIdRef.current === listenSessionId) {
+        setPhase('listening');
+      }
     } catch (err: any) {
       if (!mountedRef.current) return;
       pendingStream?.getTracks().forEach(track => track.stop());
       stopVoiceActivity();
+
+      if (!isCurrentConversation(conversationId)) return;
+
       const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
       setError(
         denied
-          ? 'Microphone access is blocked for this browser preview. Allow microphone access for localhost, then tap Start Conversation again.'
+          ? 'Microphone access is blocked. Allow microphone access for this site, then tap Start Conversation again.'
           : 'David could not start listening. Check that your microphone is available.',
       );
-      setPhase('ready');
+      setPhase('error');
     }
   };
 
-  const handleStartConversation = () => {
-    if (phase === 'ready' || phase === 'error' || phase === 'ended') {
-      void startListening();
-    }
-  };
+  const playDavidResponseAudio = async (
+    text: string,
+    options: PlayDavidAudioOptions,
+  ) => {
+    const cleanText = text.trim();
 
-  const handleEndConversation = () => {
-    if (phase !== 'listening') return;
-
-    setError(null);
-    stopListening(false);
-    setPhase('transcribing');
-  };
-
-  const playDavidResponseAudio = async (text: string) => {
-    if (!text.trim()) {
-      setPhase('ready');
+    if (!cleanText) {
+      if (options.resumeListening && isCurrentConversation(options.conversationId, options.requestId)) {
+        await startListening(options.conversationId);
+      } else if (isCurrentConversation(options.conversationId, options.requestId)) {
+        setPhase('idle');
+      }
       return;
     }
 
+    if (!isCurrentConversation(options.conversationId, options.requestId)) return;
+
     setPhase('speaking');
+    stopListening(true);
     stopCurrentAudio();
+    startSyntheticVoiceActivity();
+
+    const speechController = new AbortController();
+    speechAbortControllerRef.current?.abort();
+    speechAbortControllerRef.current = speechController;
 
     try {
-      const preparedText = prepareDavidTtsPayload(humanizeForTts(text), {
-        isGreeting: false,
+      const preparedText = prepareDavidTtsPayload(humanizeForTts(cleanText), {
+        isGreeting: Boolean(options.isGreeting),
       }).speechText;
-      const audioUrl = await generateSpeech(preparedText, { alreadyPrepared: true });
+      const audioUrl = await generateSpeech(preparedText, {
+        alreadyPrepared: true,
+        isGreeting: Boolean(options.isGreeting),
+        signal: speechController.signal,
+      });
 
-      if (!audioUrl || Platform.OS !== 'web') {
-        if (mountedRef.current) {
-          setError("David's text response is ready, but the audio could not be generated right now.");
+      if (speechAbortControllerRef.current === speechController) {
+        clearAbortController(speechAbortControllerRef);
+      }
+
+      if (!isCurrentConversation(options.conversationId, options.requestId)) {
+        if (audioUrl) {
+          try {
+            URL.revokeObjectURL(audioUrl);
+          } catch {
+            // Ignore revoke errors.
+          }
         }
-        setPhase('ready');
         return;
       }
 
-      await new Promise<void>((resolve, reject) => {
+      if (!audioUrl || Platform.OS !== 'web') {
+        setError("David's text response is ready, but the voice audio could not be generated right now.");
+        stopVoiceActivity();
+
+        if (options.resumeListening && isCurrentConversation(options.conversationId, options.requestId)) {
+          await startListening(options.conversationId);
+        } else if (isCurrentConversation(options.conversationId, options.requestId)) {
+          setPhase('idle');
+        }
+        return;
+      }
+
+      const audioResult = await new Promise<'ended' | 'stopped'>((resolve, reject) => {
         const audio = new Audio(audioUrl);
         currentAudioRef.current = audio;
+        currentAudioUrlRef.current = audioUrl;
         audio.preload = 'auto';
         let finished = false;
 
-        const finish = () => {
+        const finish = (result: 'ended' | 'stopped') => {
           if (finished) return;
           finished = true;
-          if (!mountedRef.current) {
-            resolve();
-            return;
+
+          if (currentAudioRef.current === audio) {
+            currentAudioRef.current = null;
+          }
+          if (currentAudioUrlRef.current === audioUrl) {
+            currentAudioUrlRef.current = null;
+          }
+          if (audioStopResolverRef.current) {
+            audioStopResolverRef.current = null;
           }
 
-          currentAudioRef.current = null;
           try {
             URL.revokeObjectURL(audioUrl);
           } catch {
             // Ignore revoke errors.
           }
-          setPhase('ready');
-          resolve();
+
+          resolve(result);
         };
 
-        audio.onended = finish;
+        audioStopResolverRef.current = () => finish('stopped');
+        audio.onended = () => finish('ended');
         audio.onerror = () => {
+          if (finished) return;
+          finished = true;
+
+          if (currentAudioRef.current === audio) {
+            currentAudioRef.current = null;
+          }
+          if (currentAudioUrlRef.current === audioUrl) {
+            currentAudioUrlRef.current = null;
+          }
+          audioStopResolverRef.current = null;
+
           try {
             URL.revokeObjectURL(audioUrl);
           } catch {
             // Ignore revoke errors.
           }
+
           reject(new Error("David's voice audio was returned, but the browser could not play it."));
         };
         audio.play().catch(reject);
       });
+
+      stopVoiceActivity();
+
+      if (audioResult === 'ended' && options.resumeListening && isCurrentConversation(options.conversationId, options.requestId)) {
+        await startListening(options.conversationId);
+      } else if (audioResult === 'ended' && isCurrentConversation(options.conversationId, options.requestId)) {
+        setPhase('idle');
+      }
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       if (!mountedRef.current) return;
+      if (!isCurrentConversation(options.conversationId, options.requestId)) return;
+
+      stopVoiceActivity();
       setError(err?.message || 'David had trouble speaking that response.');
-      setPhase('ready');
+      setPhase('error');
+    } finally {
+      if (speechAbortControllerRef.current === speechController) {
+        clearAbortController(speechAbortControllerRef);
+      }
     }
   };
 
-  const submitUserText = async (rawText: string) => {
-    const userText = rawText.trim();
-    if (!userText || phase === 'thinking' || phase === 'speaking') return;
+  const submitUserText = async (
+    rawText: string,
+    options: {
+      conversationId?: number;
+      resumeListening?: boolean;
+    } = {},
+  ) => {
+    const userText = normalizeTranscript(rawText);
+    if (!isMeaningfulUserText(userText)) {
+      setError("David couldn't catch enough words to respond yet.");
+      return;
+    }
+
+    if (processingRef.current) return;
+
+    const localConversationId = options.conversationId ?? conversationIdRef.current;
+    const shouldResumeListening = Boolean(options.resumeListening);
+
+    if (!conversationActiveRef.current) {
+      conversationActiveRef.current = true;
+      conversationIdRef.current = localConversationId || conversationIdRef.current + 1;
+    }
+
+    if (!isCurrentConversation(localConversationId)) return;
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    processingRef.current = true;
 
     setTextInput('');
     setError(null);
     setPhase('thinking');
 
-    const nextMessages: ChatTurn[] = [...messages, { role: 'user', content: userText }];
-    setMessages(nextMessages);
+    const nextMessages: ChatTurn[] = [...messagesRef.current, { role: 'user', content: userText }];
+    commitMessages(nextMessages);
+
+    const chatController = new AbortController();
+    chatAbortControllerRef.current?.abort();
+    chatAbortControllerRef.current = chatController;
 
     try {
       const detectedMoodKey = detectMoodKeyFromMessages(nextMessages) || undefined;
       const userId = session?.user?.id || profile?.id || 'guest';
       const usedVersesByMood = readUsedVersesByMood(userId);
       const usedVerses = detectedMoodKey ? usedVersesByMood[detectedMoodKey] || [] : [];
+
+      console.log('[David Voice] Sending exact latest user words:', userText);
+
       const response = await getDavidVoiceResponse(nextMessages, {
         responseLength: 'medium',
         moodKey: detectedMoodKey,
         usedVerses,
+        userId,
+        signal: chatController.signal,
       });
+
+      if (chatAbortControllerRef.current === chatController) {
+        clearAbortController(chatAbortControllerRef);
+      }
+
+      if (!isCurrentConversation(localConversationId, requestId)) return;
+
       const verseReference = response.verseUsed || extractVerseMarker(response.text);
       const cleanedResponse = cleanVerseMarker(response.text);
 
@@ -509,18 +835,113 @@ export default function VoiceScreen() {
         { role: 'assistant', content: cleanedResponse },
       ];
 
-      setMessages(finalMessages);
+      commitMessages(finalMessages);
       setLastResponseText(cleanedResponse);
-      await playDavidResponseAudio(cleanedResponse);
+
+      await playDavidResponseAudio(cleanedResponse, {
+        conversationId: localConversationId,
+        requestId,
+        isGreeting: false,
+        resumeListening: shouldResumeListening,
+      });
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       if (!mountedRef.current) return;
+      if (!isCurrentConversation(localConversationId, requestId)) return;
+
       setError(err?.message || 'David could not respond right now.');
-      setPhase('ready');
+      setPhase('error');
+    } finally {
+      if (chatAbortControllerRef.current === chatController) {
+        clearAbortController(chatAbortControllerRef);
+      }
+
+      if (requestIdRef.current === requestId) {
+        processingRef.current = false;
+      }
     }
   };
 
+  const handleStartConversation = async () => {
+    if (!(phaseRef.current === 'idle' || phaseRef.current === 'error' || phaseRef.current === 'ended')) {
+      return;
+    }
+
+    const nextConversationId = conversationIdRef.current + 1;
+    conversationIdRef.current = nextConversationId;
+    requestIdRef.current += 1;
+    listenSessionIdRef.current += 1;
+    conversationActiveRef.current = true;
+    processingRef.current = false;
+
+    abortPendingRequests();
+    stopListening(true);
+    stopCurrentAudio();
+    stopVoiceActivity();
+
+    commitMessages([]);
+    setTextInput('');
+    setLastResponseText('');
+    setError(null);
+    setPhase('greeting');
+
+    const firstName =
+      session?.user?.user_metadata?.full_name ||
+      session?.user?.user_metadata?.name ||
+      session?.user?.email?.split('@')?.[0];
+
+    const greeting = getVoiceSessionGreeting(firstName);
+    setLastResponseText(greeting);
+
+    await playDavidResponseAudio(greeting, {
+      conversationId: nextConversationId,
+      isGreeting: true,
+      resumeListening: true,
+    });
+  };
+
+  const handleEndConversation = () => {
+    if (phaseRef.current === 'checking' || phaseRef.current === 'idle' || phaseRef.current === 'ended') {
+      return;
+    }
+
+    conversationActiveRef.current = false;
+    conversationIdRef.current += 1;
+    requestIdRef.current += 1;
+    listenSessionIdRef.current += 1;
+    processingRef.current = false;
+
+    setError(null);
+    abortPendingRequests();
+    stopListening(true);
+    stopCurrentAudio();
+    stopVoiceActivity();
+    setTextInput('');
+    setPhase('ended');
+  };
+
   const handleTextSubmit = async () => {
-    await submitUserText(textInput);
+    const manualText = textInput;
+
+    if (!manualText.trim()) return;
+
+    if (!conversationActiveRef.current) {
+      const manualConversationId = conversationIdRef.current + 1;
+      conversationIdRef.current = manualConversationId;
+      conversationActiveRef.current = true;
+      commitMessages([]);
+      setLastResponseText('');
+    }
+
+    await submitUserText(manualText, {
+      conversationId: conversationIdRef.current,
+      resumeListening: false,
+    });
+
+    if (conversationActiveRef.current && phaseRef.current !== 'error') {
+      conversationActiveRef.current = false;
+      setPhase('idle');
+    }
   };
 
   if (!userContextLoading && !hasVoiceAccess) {
@@ -537,22 +958,33 @@ export default function VoiceScreen() {
     );
   }
 
-  const inputIsVisible = phase === 'ready' || phase === 'error' || phase === 'ended';
+  const inputIsVisible = phase === 'idle' || phase === 'error' || phase === 'ended';
   const inputIsDisabled =
     phase === 'thinking' ||
     phase === 'speaking' ||
     phase === 'starting' ||
     phase === 'listening' ||
-    phase === 'transcribing';
-  const voiceWaveIsActive = phase === 'starting' || phase === 'listening';
-  const startConversationIsEnabled = phase === 'ready' || phase === 'error' || phase === 'ended';
-  const endConversationIsEnabled = phase === 'listening';
+    phase === 'transcribing' ||
+    phase === 'greeting';
+  const voiceWaveIsActive = phase === 'starting' || phase === 'listening' || phase === 'speaking' || phase === 'greeting';
+  const startConversationIsEnabled = phase === 'idle' || phase === 'error' || phase === 'ended';
+  const endConversationIsEnabled =
+    phase === 'greeting' ||
+    phase === 'starting' ||
+    phase === 'listening' ||
+    phase === 'transcribing' ||
+    phase === 'thinking' ||
+    phase === 'speaking';
   const voiceWaveLabel =
     phase === 'starting'
       ? 'Opening microphone'
       : phase === 'listening'
         ? 'Listening'
-        : 'Voice ready';
+        : phase === 'greeting'
+          ? 'David starting'
+          : phase === 'speaking'
+            ? 'David speaking'
+            : 'Voice ready';
 
   return (
     <View style={styles.outerContainer}>
@@ -569,17 +1001,21 @@ export default function VoiceScreen() {
               ? 'Getting David ready...'
               : phase === 'ended'
                 ? 'Call ended. Start again when you are ready.'
-                : phase === 'thinking'
-                  ? 'David is reflecting...'
-                  : phase === 'starting'
-                    ? 'Opening your microphone...'
-                  : phase === 'listening'
-                    ? 'David is listening now. Tap End Conversation when you finish.'
+                : phase === 'greeting'
+                  ? 'David is starting the conversation...'
+                  : phase === 'thinking'
+                    ? 'David is reflecting...'
+                    : phase === 'starting'
+                      ? 'Opening your microphone...'
+                    : phase === 'listening'
+                      ? 'David is listening...'
                     : phase === 'transcribing'
                       ? 'Sending your words to David...'
-                      : phase === 'speaking'
-                        ? 'David is speaking...'
-                        : 'Tap Start Conversation when you are ready to speak.'}
+                    : phase === 'speaking'
+                      ? 'David is speaking...'
+                    : phase === 'error'
+                      ? 'Something needs attention before David can continue.'
+                      : 'Tap Start Conversation when you are ready to speak.'}
           </Text>
         </View>
 
