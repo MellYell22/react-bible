@@ -15,11 +15,10 @@ import { useUser } from '../UserContext';
 import { createCheckoutSession } from '../services/stripe';
 import { PLANS } from '../constants';
 import { hasProAccess, OWNER_EMAIL } from '../utils/tier';
-import { humanizeForTts, prepareDavidTtsPayload } from '../utils/davidSpeechDelivery';
 import { detectMoodKeyFromMessages } from '../utils/davidMoodContext';
-import { getVoiceSessionGreeting } from '../constants/persona';
 
 const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
+const DAVID_OPENING_GREETING = "Hey, I'm here with you. How are you feeling today?";
 
 const SPEECH_VOLUME_THRESHOLD = 0.11;
 const SILENCE_STOP_MS = 1100;
@@ -137,6 +136,7 @@ export default function VoiceScreen() {
 
   const phaseRef = useRef<ScreenPhase>('checking');
   const messagesRef = useRef<ChatTurn[]>([]);
+  const mountedRef = useRef(true);
   const conversationActiveRef = useRef(false);
   const conversationIdRef = useRef(0);
   const requestIdRef = useRef(0);
@@ -146,16 +146,17 @@ export default function VoiceScreen() {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
   const audioStopResolverRef = useRef<(() => void) | null>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
   const discardRecordingRef = useRef(false);
   const recordingMimeTypeRef = useRef('audio/webm');
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const voiceActivityFrameRef = useRef<number | null>(null);
   const voiceLevelsRef = useRef<number[]>(IDLE_VOICE_LEVELS);
-  const mountedRef = useRef(true);
 
   const recordingStartedAtRef = useRef(0);
   const speechDetectedRef = useRef(false);
@@ -199,7 +200,6 @@ export default function VoiceScreen() {
     transcribeAbortControllerRef.current?.abort();
     chatAbortControllerRef.current?.abort();
     speechAbortControllerRef.current?.abort();
-
     transcribeAbortControllerRef.current = null;
     chatAbortControllerRef.current = null;
     speechAbortControllerRef.current = null;
@@ -222,13 +222,11 @@ export default function VoiceScreen() {
         audio.currentTime = 0;
       }
     } catch {
-      // Ignore browser audio cleanup errors.
+      // Audio cleanup should never break David's state machine.
     }
 
     try {
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
     } catch {
       // Ignore revoke errors.
     }
@@ -267,7 +265,6 @@ export default function VoiceScreen() {
           Math.abs(Math.cos(now / 295 + index * 0.47)) * 0.18;
         const target = Math.max(0.18, Math.min(0.86, idleLevel + rise));
         const previous = voiceLevelsRef.current[index] || idleLevel;
-
         return previous + (target - previous) * 0.22;
       });
 
@@ -304,13 +301,16 @@ export default function VoiceScreen() {
     mediaRecorderRef.current = null;
   };
 
+  const getRecordingMimeType = () => {
+    if (typeof MediaRecorder === 'undefined') return '';
+    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+    if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
+    return '';
+  };
+
   const startVoiceActivity = (
     stream: MediaStream,
-    options: {
-      monitorSilence?: boolean;
-      conversationId?: number;
-      listenSessionId?: number;
-    } = {},
+    options: { conversationId: number; listenSessionId: number },
   ) => {
     stopVoiceActivity();
 
@@ -327,10 +327,10 @@ export default function VoiceScreen() {
       const audioContext = new AudioContextCtor();
       const analyser = audioContext.createAnalyser();
       const source = audioContext.createMediaStreamSource(stream);
+      const timeData = new Uint8Array(256);
 
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.78;
-      const timeData = new Uint8Array(analyser.fftSize);
       source.connect(analyser);
       audioContextRef.current = audioContext;
       analyserRef.current = analyser;
@@ -364,44 +364,38 @@ export default function VoiceScreen() {
           );
           const previous = voiceLevelsRef.current[index] || idleLevel;
           const smoothing = 0.2 + normalizedVolume * 0.18;
-
           return previous + (target - previous) * smoothing;
         });
 
         voiceLevelsRef.current = nextLevels;
         setVoiceLevels(nextLevels);
 
-        if (options.monitorSilence && conversationActiveRef.current) {
-          if (normalizedVolume >= SPEECH_VOLUME_THRESHOLD) {
-            speechDetectedRef.current = true;
-            lastSpeechAtRef.current = now;
-          }
+        if (normalizedVolume >= SPEECH_VOLUME_THRESHOLD) {
+          speechDetectedRef.current = true;
+          lastSpeechAtRef.current = now;
+        }
 
-          const elapsed = now - recordingStartedAtRef.current;
-          const silenceElapsed = lastSpeechAtRef.current ? now - lastSpeechAtRef.current : 0;
-          const localConversationId = options.conversationId ?? conversationIdRef.current;
-          const localListenSessionId = options.listenSessionId ?? listenSessionIdRef.current;
+        const elapsed = now - recordingStartedAtRef.current;
+        const silenceElapsed = lastSpeechAtRef.current ? now - lastSpeechAtRef.current : 0;
 
-          if (
-            !autoStopTriggeredRef.current &&
-            mediaRecorderRef.current?.state === 'recording' &&
-            isCurrentConversation(localConversationId) &&
-            listenSessionIdRef.current === localListenSessionId
-          ) {
-            const shouldAutoStopForSilence =
-              speechDetectedRef.current &&
-              elapsed >= MIN_RECORDING_MS &&
-              silenceElapsed >= SILENCE_STOP_MS;
+        const shouldStopForSilence =
+          speechDetectedRef.current &&
+          elapsed >= MIN_RECORDING_MS &&
+          silenceElapsed >= SILENCE_STOP_MS;
 
-            const shouldAutoStopForHardLimit = elapsed >= HARD_MAX_RECORDING_MS;
+        const shouldStopForHardLimit = elapsed >= HARD_MAX_RECORDING_MS;
 
-            if (shouldAutoStopForSilence || shouldAutoStopForHardLimit) {
-              autoStopTriggeredRef.current = true;
-              setPhase('transcribing');
-              stopListening(false);
-              return;
-            }
-          }
+        if (
+          !autoStopTriggeredRef.current &&
+          mediaRecorderRef.current?.state === 'recording' &&
+          isCurrentConversation(options.conversationId) &&
+          listenSessionIdRef.current === options.listenSessionId &&
+          (shouldStopForSilence || shouldStopForHardLimit)
+        ) {
+          autoStopTriggeredRef.current = true;
+          setPhase('transcribing');
+          stopListening(false);
+          return;
         }
 
         voiceActivityFrameRef.current = requestAnimationFrame(tick);
@@ -413,26 +407,10 @@ export default function VoiceScreen() {
     }
   };
 
-  const getRecordingMimeType = () => {
-    if (typeof MediaRecorder === 'undefined') return '';
+  const startListening = async (options: { conversationId: number }) => {
+    const localConversationId = options.conversationId;
 
-    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-      return 'audio/webm;codecs=opus';
-    }
-
-    if (MediaRecorder.isTypeSupported('audio/webm')) {
-      return 'audio/webm';
-    }
-
-    return '';
-  };
-
-  const startListening = async (options: { conversationId?: number } = {}) => {
-    const localConversationId = options.conversationId ?? conversationIdRef.current;
-
-    if (!isCurrentConversation(localConversationId)) {
-      return;
-    }
+    if (!isCurrentConversation(localConversationId)) return;
 
     if (Platform.OS !== 'web') {
       setError('Microphone input is available in the web preview.');
@@ -441,13 +419,13 @@ export default function VoiceScreen() {
     }
 
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError('This browser does not support microphone recording. Use Chrome or Edge and allow microphone access.');
+      setError('This browser does not support microphone recording. You can still type your message to David.');
       setPhase('error');
       return;
     }
 
-    abortPendingRequests();
     stopCurrentAudio();
+    stopListening(true);
     setError(null);
     setPhase('starting');
     startSyntheticVoiceActivity();
@@ -480,7 +458,6 @@ export default function VoiceScreen() {
       autoStopTriggeredRef.current = false;
 
       startVoiceActivity(stream, {
-        monitorSilence: true,
         conversationId: localConversationId,
         listenSessionId: localListenSessionId,
       });
@@ -492,9 +469,9 @@ export default function VoiceScreen() {
       };
 
       recorder.onerror = () => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || !isCurrentConversation(localConversationId)) return;
         stopVoiceActivity();
-        setError('David had trouble accessing the microphone. Allow microphone access for this site, then try again.');
+        setError('David had trouble accessing the microphone. You can type your message instead.');
         setPhase('error');
       };
 
@@ -516,7 +493,6 @@ export default function VoiceScreen() {
         }
 
         if (!chunks.length) {
-          setError("David couldn't hear enough audio. Try speaking again.");
           setPhase('listening');
           void startListening({ conversationId: localConversationId });
           return;
@@ -545,10 +521,7 @@ export default function VoiceScreen() {
 
           const transcript = normalizeTranscript(result.transcript);
           if (!isMeaningfulUserText(transcript)) {
-            const reason = result.reason === 'audio_too_small'
-              ? 'Try speaking a little longer before stopping.'
-              : 'David could not catch enough words yet. Try again.';
-            setError(reason);
+            setError('David could not catch enough words yet. Try again, or type your message below.');
             setPhase('listening');
             void startListening({ conversationId: localConversationId });
             return;
@@ -561,10 +534,9 @@ export default function VoiceScreen() {
           });
         } catch (err: any) {
           if (err?.name === 'AbortError') return;
-          if (!mountedRef.current) return;
-          if (!isCurrentConversation(localConversationId)) return;
+          if (!mountedRef.current || !isCurrentConversation(localConversationId)) return;
 
-          setError(err?.message || "David couldn't transcribe that audio.");
+          setError(err?.message || "David couldn't transcribe that audio. You can type your message instead.");
           setPhase('error');
         } finally {
           if (transcribeAbortControllerRef.current === transcribeController) {
@@ -576,14 +548,14 @@ export default function VoiceScreen() {
       recorder.start();
       setPhase('listening');
     } catch (err: any) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || !isCurrentConversation(localConversationId)) return;
       pendingStream?.getTracks().forEach(track => track.stop());
       stopVoiceActivity();
       const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
       setError(
         denied
-          ? 'Microphone access is blocked for this site. Allow microphone access and try again.'
-          : 'David could not start listening. Check that your microphone is available.',
+          ? 'Microphone access is blocked. You can type your message to David below.'
+          : 'David could not start listening. You can type your message to David below.',
       );
       setPhase('error');
     }
@@ -593,7 +565,9 @@ export default function VoiceScreen() {
     text: string,
     options: PlayDavidAudioOptions,
   ) => {
-    if (!text.trim()) {
+    const spokenText = text.trim();
+
+    if (!spokenText) {
       if (options.resumeListening && isCurrentConversation(options.conversationId, options.requestId)) {
         void startListening({ conversationId: options.conversationId });
       } else if (isCurrentConversation(options.conversationId, options.requestId)) {
@@ -602,24 +576,20 @@ export default function VoiceScreen() {
       return;
     }
 
-    if (!isCurrentConversation(options.conversationId, options.requestId)) {
-      return;
-    }
+    if (!isCurrentConversation(options.conversationId, options.requestId)) return;
 
     stopListening(true);
     stopCurrentAudio();
     setPhase(options.isGreeting ? 'greeting' : 'speaking');
+    startSyntheticVoiceActivity();
 
     const speechController = new AbortController();
     speechAbortControllerRef.current?.abort();
     speechAbortControllerRef.current = speechController;
 
     try {
-      const preparedText = prepareDavidTtsPayload(humanizeForTts(text), {
+      const audioUrl = await generateSpeech(spokenText, {
         isGreeting: options.isGreeting,
-      }).speechText;
-      const audioUrl = await generateSpeech(preparedText, {
-        alreadyPrepared: true,
         signal: speechController.signal,
       });
 
@@ -627,17 +597,16 @@ export default function VoiceScreen() {
         clearAbortController(speechAbortControllerRef);
       }
 
-      if (!isCurrentConversation(options.conversationId, options.requestId)) {
-        return;
-      }
+      if (!isCurrentConversation(options.conversationId, options.requestId)) return;
 
       if (!audioUrl || Platform.OS !== 'web') {
+        stopVoiceActivity();
         if (options.resumeListening) {
           setPhase('listening');
           void startListening({ conversationId: options.conversationId });
-          return;
+        } else {
+          setPhase('idle');
         }
-        setPhase('idle');
         return;
       }
 
@@ -648,7 +617,6 @@ export default function VoiceScreen() {
         const finish = () => {
           if (finished) return;
           finished = true;
-
           currentAudioRef.current = null;
           currentAudioUrlRef.current = null;
           audioStopResolverRef.current = null;
@@ -671,12 +639,15 @@ export default function VoiceScreen() {
           finish();
           reject(new Error("David's voice audio was returned, but the browser could not play it."));
         };
-        audio.play().catch(reject);
+        audio.play().catch(error => {
+          finish();
+          reject(error);
+        });
       });
 
-      if (!isCurrentConversation(options.conversationId, options.requestId)) {
-        return;
-      }
+      stopVoiceActivity();
+
+      if (!isCurrentConversation(options.conversationId, options.requestId)) return;
 
       if (options.resumeListening) {
         setPhase('listening');
@@ -686,40 +657,23 @@ export default function VoiceScreen() {
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      if (!mountedRef.current) return;
-      if (!isCurrentConversation(options.conversationId, options.requestId)) return;
+      if (!mountedRef.current || !isCurrentConversation(options.conversationId, options.requestId)) return;
 
-      setError(err?.message || 'David had trouble speaking that response.');
-      setPhase('error');
+      stopVoiceActivity();
+      setError(err?.message || 'David had trouble speaking that response, but the text is still here.');
+
+      if (options.resumeListening) {
+        setPhase('listening');
+        void startListening({ conversationId: options.conversationId });
+      } else {
+        setPhase('idle');
+      }
     } finally {
       if (speechAbortControllerRef.current === speechController) {
         clearAbortController(speechAbortControllerRef);
       }
     }
   };
-
-  useEffect(() => {
-    mountedRef.current = true;
-
-    return () => {
-      mountedRef.current = false;
-      conversationActiveRef.current = false;
-      abortPendingRequests();
-      stopListening(true);
-      stopVoiceActivity();
-      stopCurrentAudio();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (userContextLoading) return;
-    if (hasVoiceAccess) {
-      setPhase(current => (current === 'checking' ? 'idle' : current));
-      return;
-    }
-
-    setPhase('idle');
-  }, [hasVoiceAccess, userContextLoading]);
 
   const submitUserText = async (
     rawText: string,
@@ -729,8 +683,9 @@ export default function VoiceScreen() {
     } = {},
   ) => {
     const userText = normalizeTranscript(rawText);
+
     if (!isMeaningfulUserText(userText)) {
-      setError("David couldn't catch enough words to respond yet.");
+      setError("David needs a few clear words before he responds.");
       return;
     }
 
@@ -739,17 +694,19 @@ export default function VoiceScreen() {
     const localConversationId = options.conversationId ?? conversationIdRef.current;
     const shouldResumeListening = Boolean(options.resumeListening);
 
-    if (!conversationActiveRef.current) {
-      conversationActiveRef.current = true;
-      conversationIdRef.current = localConversationId || conversationIdRef.current + 1;
+    if (!isCurrentConversation(localConversationId)) {
+      setError('Press Start Conversation first so David knows this is a fresh live session.');
+      setPhase('idle');
+      return;
     }
-
-    if (!isCurrentConversation(localConversationId)) return;
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     processingRef.current = true;
 
+    transcribeAbortControllerRef.current?.abort();
+    stopListening(true);
+    stopCurrentAudio();
     setTextInput('');
     setError(null);
     setPhase('thinking');
@@ -766,8 +723,6 @@ export default function VoiceScreen() {
       const userId = session?.user?.id || profile?.id || 'guest';
       const usedVersesByMood = readUsedVersesByMood(userId);
       const usedVerses = detectedMoodKey ? usedVersesByMood[detectedMoodKey] || [] : [];
-
-      console.log('[David Voice] Sending exact latest user words:', userText);
 
       const response = await getDavidVoiceResponse(nextMessages, {
         responseLength: 'medium',
@@ -809,10 +764,9 @@ export default function VoiceScreen() {
       });
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      if (!mountedRef.current) return;
-      if (!isCurrentConversation(localConversationId, requestId)) return;
+      if (!mountedRef.current || !isCurrentConversation(localConversationId, requestId)) return;
 
-      setError(err?.message || 'David could not respond right now.');
+      setError(err?.message || 'David could not respond right now. Try again.');
       setPhase('error');
     } finally {
       if (chatAbortControllerRef.current === chatController) {
@@ -844,19 +798,11 @@ export default function VoiceScreen() {
 
     commitMessages([]);
     setTextInput('');
-    setLastResponseText('');
+    setLastResponseText(DAVID_OPENING_GREETING);
     setError(null);
     setPhase('greeting');
 
-    const firstName =
-      session?.user?.user_metadata?.full_name ||
-      session?.user?.user_metadata?.name ||
-      session?.user?.email?.split('@')?.[0];
-
-    const greeting = getVoiceSessionGreeting(firstName);
-    setLastResponseText(greeting);
-
-    await playDavidResponseAudio(greeting, {
+    await playDavidResponseAudio(DAVID_OPENING_GREETING, {
       conversationId: nextConversationId,
       isGreeting: true,
       resumeListening: true,
@@ -864,7 +810,7 @@ export default function VoiceScreen() {
   };
 
   const handleEndConversation = () => {
-    if (phaseRef.current === 'checking' || phaseRef.current === 'idle' || phaseRef.current === 'ended') {
+    if (phaseRef.current === 'checking' || phaseRef.current === 'ended') {
       return;
     }
 
@@ -911,27 +857,31 @@ export default function VoiceScreen() {
 
   const handleTextSubmit = async () => {
     const manualText = textInput;
-
     if (!manualText.trim()) return;
-
-    if (!conversationActiveRef.current) {
-      const manualConversationId = conversationIdRef.current + 1;
-      conversationIdRef.current = manualConversationId;
-      conversationActiveRef.current = true;
-      commitMessages([]);
-      setLastResponseText('');
-    }
 
     await submitUserText(manualText, {
       conversationId: conversationIdRef.current,
       resumeListening: false,
     });
-
-    if (conversationActiveRef.current && phaseRef.current !== 'error') {
-      conversationActiveRef.current = false;
-      setPhase('idle');
-    }
   };
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      conversationActiveRef.current = false;
+      abortPendingRequests();
+      stopListening(true);
+      stopVoiceActivity();
+      stopCurrentAudio();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (userContextLoading) return;
+    setPhase(current => (current === 'checking' ? 'idle' : current));
+  }, [userContextLoading]);
 
   if (!userContextLoading && !hasVoiceAccess) {
     return (
@@ -939,9 +889,7 @@ export default function VoiceScreen() {
         <View style={styles.lockCard}>
           <Lock color="#4F46E5" size={48} style={{ marginBottom: 20 }} />
           <Text style={styles.lockTitle}>Pro Feature</Text>
-          <Text style={styles.lockText}>
-            Voice with David is available for Pro users.
-          </Text>
+          <Text style={styles.lockText}>Voice with David is available for Pro users.</Text>
           <TouchableOpacity
             style={[
               styles.lockUpgradeButton,
@@ -968,23 +916,14 @@ export default function VoiceScreen() {
     );
   }
 
-  const inputIsVisible = phase === 'idle' || phase === 'error' || phase === 'ended';
-  const inputIsDisabled =
-    phase === 'thinking' ||
-    phase === 'speaking' ||
-    phase === 'starting' ||
-    phase === 'listening' ||
-    phase === 'transcribing' ||
-    phase === 'greeting';
+  const conversationIsActive = conversationActiveRef.current;
+  const inputIsVisible = conversationIsActive && (phase === 'listening' || phase === 'error' || phase === 'idle');
+  const inputIsDisabled = phase === 'thinking' || phase === 'speaking' || phase === 'starting' || phase === 'transcribing' || phase === 'greeting';
   const voiceWaveIsActive = phase === 'starting' || phase === 'listening' || phase === 'speaking' || phase === 'greeting';
-  const startConversationIsEnabled = phase === 'idle' || phase === 'error' || phase === 'ended';
-  const endConversationIsEnabled =
-    phase === 'greeting' ||
-    phase === 'starting' ||
-    phase === 'listening' ||
-    phase === 'transcribing' ||
-    phase === 'thinking' ||
-    phase === 'speaking';
+  const startConversationIsEnabled = !conversationIsActive && (phase === 'idle' || phase === 'error' || phase === 'ended');
+  const endConversationIsEnabled = conversationIsActive && phase !== 'checking' && phase !== 'ended';
+  const sendIsDisabled = !textInput.trim() || inputIsDisabled || !conversationIsActive;
+
   const voiceWaveLabel =
     phase === 'starting'
       ? 'Opening microphone'
@@ -1017,15 +956,15 @@ export default function VoiceScreen() {
                     ? 'David is reflecting...'
                     : phase === 'starting'
                       ? 'Opening your microphone...'
-                    : phase === 'listening'
-                      ? 'David is listening...'
-                    : phase === 'transcribing'
-                      ? 'Sending your words to David...'
-                    : phase === 'speaking'
-                      ? 'David is speaking...'
-                    : phase === 'error'
-                      ? 'Something needs attention before David can continue.'
-                      : 'Tap Start Conversation when you are ready to speak.'}
+                      : phase === 'listening'
+                        ? 'David is listening...'
+                        : phase === 'transcribing'
+                          ? 'Sending your words to David...'
+                          : phase === 'speaking'
+                            ? 'David is speaking...'
+                            : phase === 'error'
+                              ? 'Something needs attention before David can continue.'
+                              : 'Tap Start Conversation when you are ready to speak.'}
           </Text>
         </View>
 
@@ -1127,7 +1066,7 @@ export default function VoiceScreen() {
 
         {inputIsVisible && (
           <View style={styles.textInputContainer}>
-            <Text style={styles.textInputLabel}>Share your mood with David</Text>
+            <Text style={styles.textInputLabel}>Type to David if the mic misses you</Text>
             <View style={styles.textInputRow}>
               <TextInput
                 style={styles.textInputField}
@@ -1143,10 +1082,10 @@ export default function VoiceScreen() {
               <TouchableOpacity
                 style={[
                   styles.sendButton,
-                  (!textInput.trim() || inputIsDisabled) && styles.sendButtonDisabled,
+                  sendIsDisabled && styles.sendButtonDisabled,
                 ]}
                 onPress={handleTextSubmit}
-                disabled={!textInput.trim() || inputIsDisabled}
+                disabled={sendIsDisabled}
               >
                 <Send color="#0b1e3d" size={18} />
               </TouchableOpacity>
