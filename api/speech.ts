@@ -1,6 +1,6 @@
 const DAVID_ELEVENLABS_VOICE_ID = 'ewxUvnyvvOehYjKjUVKC';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
-const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_v3';
+const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_turbo_v2_5';
 const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_44100_128';
 
 import { humanizeForTts } from '../src/utils/davidSpeechDelivery.js';
@@ -54,8 +54,8 @@ export default async function handler(req: any, res: any) {
       voice_settings: {
         stability: 0.72,
         similarity_boost: 0.88,
-        speed: 0.92,
-        style: 0.4,
+        speed: 0.96,
+        style: 0.32,
       },
     };
 
@@ -113,6 +113,7 @@ export default async function handler(req: any, res: any) {
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'no-store');
 
     return res.status(200).send(buffer);
   } catch (error: any) {
