@@ -377,12 +377,8 @@ export default function VoiceScreen() {
 
         const elapsed = now - recordingStartedAtRef.current;
         const silenceElapsed = lastSpeechAtRef.current ? now - lastSpeechAtRef.current : 0;
-
         const shouldStopForSilence =
-          speechDetectedRef.current &&
-          elapsed >= MIN_RECORDING_MS &&
-          silenceElapsed >= SILENCE_STOP_MS;
-
+          speechDetectedRef.current && elapsed >= MIN_RECORDING_MS && silenceElapsed >= SILENCE_STOP_MS;
         const shouldStopForHardLimit = elapsed >= HARD_MAX_RECORDING_MS;
 
         if (
@@ -409,7 +405,6 @@ export default function VoiceScreen() {
 
   const startListening = async (options: { conversationId: number }) => {
     const localConversationId = options.conversationId;
-
     if (!isCurrentConversation(localConversationId)) return;
 
     if (Platform.OS !== 'web') {
@@ -463,9 +458,7 @@ export default function VoiceScreen() {
       });
 
       recorder.ondataavailable = event => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
       recorder.onerror = () => {
@@ -504,12 +497,8 @@ export default function VoiceScreen() {
         transcribeAbortControllerRef.current = transcribeController;
 
         try {
-          const audioBlob = new Blob(chunks, {
-            type: recordingMimeTypeRef.current || 'audio/webm',
-          });
-          const result = await transcribeAudio(audioBlob, {
-            signal: transcribeController.signal,
-          });
+          const audioBlob = new Blob(chunks, { type: recordingMimeTypeRef.current || 'audio/webm' });
+          const result = await transcribeAudio(audioBlob, { signal: transcribeController.signal });
 
           if (transcribeAbortControllerRef.current === transcribeController) {
             clearAbortController(transcribeAbortControllerRef);
@@ -528,10 +517,7 @@ export default function VoiceScreen() {
           }
 
           setTextInput(transcript);
-          await submitUserText(transcript, {
-            conversationId: localConversationId,
-            resumeListening: true,
-          });
+          await submitUserText(transcript, { conversationId: localConversationId, resumeListening: true });
         } catch (err: any) {
           if (err?.name === 'AbortError') return;
           if (!mountedRef.current || !isCurrentConversation(localConversationId)) return;
@@ -561,10 +547,7 @@ export default function VoiceScreen() {
     }
   };
 
-  const playDavidResponseAudio = async (
-    text: string,
-    options: PlayDavidAudioOptions,
-  ) => {
+  const playDavidResponseAudio = async (text: string, options: PlayDavidAudioOptions) => {
     const spokenText = text.trim();
 
     if (!spokenText) {
@@ -601,6 +584,7 @@ export default function VoiceScreen() {
 
       if (!audioUrl || Platform.OS !== 'web') {
         stopVoiceActivity();
+        setLastResponseText(spokenText);
         if (options.resumeListening) {
           setPhase('listening');
           void startListening({ conversationId: options.conversationId });
@@ -614,7 +598,7 @@ export default function VoiceScreen() {
         const audio = new Audio(audioUrl);
         let finished = false;
 
-        const finish = () => {
+        const cleanup = () => {
           if (finished) return;
           finished = true;
           currentAudioRef.current = null;
@@ -626,21 +610,25 @@ export default function VoiceScreen() {
           } catch {
             // Ignore revoke errors.
           }
-
-          resolve();
         };
 
         currentAudioRef.current = audio;
         currentAudioUrlRef.current = audioUrl;
-        audioStopResolverRef.current = finish;
+        audioStopResolverRef.current = () => {
+          cleanup();
+          resolve();
+        };
         audio.preload = 'auto';
-        audio.onended = finish;
+        audio.onended = () => {
+          cleanup();
+          resolve();
+        };
         audio.onerror = () => {
-          finish();
+          cleanup();
           reject(new Error("David's voice audio was returned, but the browser could not play it."));
         };
         audio.play().catch(error => {
-          finish();
+          cleanup();
           reject(error);
         });
       });
@@ -648,6 +636,8 @@ export default function VoiceScreen() {
       stopVoiceActivity();
 
       if (!isCurrentConversation(options.conversationId, options.requestId)) return;
+
+      setLastResponseText(spokenText);
 
       if (options.resumeListening) {
         setPhase('listening');
@@ -660,6 +650,7 @@ export default function VoiceScreen() {
       if (!mountedRef.current || !isCurrentConversation(options.conversationId, options.requestId)) return;
 
       stopVoiceActivity();
+      setLastResponseText(spokenText);
       setError(err?.message || 'David had trouble speaking that response, but the text is still here.');
 
       if (options.resumeListening) {
@@ -677,10 +668,7 @@ export default function VoiceScreen() {
 
   const submitUserText = async (
     rawText: string,
-    options: {
-      conversationId?: number;
-      resumeListening?: boolean;
-    } = {},
+    options: { conversationId?: number; resumeListening?: boolean } = {},
   ) => {
     const userText = normalizeTranscript(rawText);
 
@@ -707,6 +695,7 @@ export default function VoiceScreen() {
     transcribeAbortControllerRef.current?.abort();
     stopListening(true);
     stopCurrentAudio();
+    setLastResponseText('');
     setTextInput('');
     setError(null);
     setPhase('thinking');
@@ -748,13 +737,7 @@ export default function VoiceScreen() {
         resetUsedVerses: response.resetUsedVerses,
       });
 
-      const finalMessages: ChatTurn[] = [
-        ...nextMessages,
-        { role: 'assistant', content: cleanedResponse },
-      ];
-
-      commitMessages(finalMessages);
-      setLastResponseText(cleanedResponse);
+      commitMessages([...nextMessages, { role: 'assistant', content: cleanedResponse }]);
 
       await playDavidResponseAudio(cleanedResponse, {
         conversationId: localConversationId,
@@ -780,9 +763,7 @@ export default function VoiceScreen() {
   };
 
   const handleStartConversation = async () => {
-    if (!(phaseRef.current === 'idle' || phaseRef.current === 'error' || phaseRef.current === 'ended')) {
-      return;
-    }
+    if (!(phaseRef.current === 'idle' || phaseRef.current === 'error' || phaseRef.current === 'ended')) return;
 
     const nextConversationId = conversationIdRef.current + 1;
     conversationIdRef.current = nextConversationId;
@@ -798,7 +779,7 @@ export default function VoiceScreen() {
 
     commitMessages([]);
     setTextInput('');
-    setLastResponseText(DAVID_OPENING_GREETING);
+    setLastResponseText('');
     setError(null);
     setPhase('greeting');
 
@@ -810,9 +791,7 @@ export default function VoiceScreen() {
   };
 
   const handleEndConversation = () => {
-    if (phaseRef.current === 'checking' || phaseRef.current === 'ended') {
-      return;
-    }
+    if (phaseRef.current === 'checking' || phaseRef.current === 'ended') return;
 
     conversationActiveRef.current = false;
     conversationIdRef.current += 1;
@@ -891,10 +870,7 @@ export default function VoiceScreen() {
           <Text style={styles.lockTitle}>Pro Feature</Text>
           <Text style={styles.lockText}>Voice with David is available for Pro users.</Text>
           <TouchableOpacity
-            style={[
-              styles.lockUpgradeButton,
-              upgradeLoading && styles.lockUpgradeButtonDisabled,
-            ]}
+            style={[styles.lockUpgradeButton, upgradeLoading && styles.lockUpgradeButtonDisabled]}
             onPress={handleUpgradeToPro}
             disabled={upgradeLoading}
             activeOpacity={0.85}
@@ -923,6 +899,13 @@ export default function VoiceScreen() {
   const startConversationIsEnabled = !conversationIsActive && (phase === 'idle' || phase === 'error' || phase === 'ended');
   const endConversationIsEnabled = conversationIsActive && phase !== 'checking' && phase !== 'ended';
   const sendIsDisabled = !textInput.trim() || inputIsDisabled || !conversationIsActive;
+  const responseTextCanShow =
+    lastResponseText.trim().length > 0 &&
+    phase !== 'greeting' &&
+    phase !== 'starting' &&
+    phase !== 'thinking' &&
+    phase !== 'transcribing' &&
+    phase !== 'speaking';
 
   const voiceWaveLabel =
     phase === 'starting'
@@ -969,20 +952,12 @@ export default function VoiceScreen() {
         </View>
 
         <View
-          style={[
-            styles.voiceWavePanel,
-            voiceWaveIsActive && styles.voiceWavePanelActive,
-          ]}
+          style={[styles.voiceWavePanel, voiceWaveIsActive && styles.voiceWavePanelActive]}
           accessibilityRole="image"
           accessibilityLabel={voiceWaveIsActive ? 'Active voice wave' : 'Inactive voice wave'}
         >
           <View style={styles.voiceWaveHeader}>
-            <View
-              style={[
-                styles.voiceWaveDot,
-                voiceWaveIsActive && styles.voiceWaveDotActive,
-              ]}
-            />
+            <View style={[styles.voiceWaveDot, voiceWaveIsActive && styles.voiceWaveDotActive]} />
             <Text style={styles.voiceWaveLabel}>{voiceWaveLabel}</Text>
           </View>
           <View style={styles.voiceWave}>
@@ -1004,11 +979,7 @@ export default function VoiceScreen() {
 
         <View style={styles.conversationControls}>
           <TouchableOpacity
-            style={[
-              styles.conversationButton,
-              styles.startConversationButton,
-              !startConversationIsEnabled && styles.conversationButtonDisabled,
-            ]}
+            style={[styles.conversationButton, styles.startConversationButton, !startConversationIsEnabled && styles.conversationButtonDisabled]}
             onPress={handleStartConversation}
             disabled={!startConversationIsEnabled}
             activeOpacity={0.82}
@@ -1017,22 +988,13 @@ export default function VoiceScreen() {
             accessibilityState={{ disabled: !startConversationIsEnabled }}
           >
             <Mic color={startConversationIsEnabled ? '#0b1e3d' : 'rgba(11, 30, 61, 0.42)'} size={18} />
-            <Text
-              style={[
-                styles.conversationButtonText,
-                !startConversationIsEnabled && styles.conversationButtonTextDisabled,
-              ]}
-            >
+            <Text style={[styles.conversationButtonText, !startConversationIsEnabled && styles.conversationButtonTextDisabled]}>
               Start Conversation
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              styles.conversationButton,
-              styles.endConversationButton,
-              !endConversationIsEnabled && styles.conversationButtonDisabled,
-            ]}
+            style={[styles.conversationButton, styles.endConversationButton, !endConversationIsEnabled && styles.conversationButtonDisabled]}
             onPress={handleEndConversation}
             disabled={!endConversationIsEnabled}
             activeOpacity={0.82}
@@ -1045,21 +1007,15 @@ export default function VoiceScreen() {
               fill={endConversationIsEnabled ? '#fff8dc' : 'rgba(255, 248, 220, 0.16)'}
               size={15}
             />
-            <Text
-              style={[
-                styles.conversationButtonText,
-                styles.endConversationButtonText,
-                !endConversationIsEnabled && styles.endConversationButtonTextDisabled,
-              ]}
-            >
+            <Text style={[styles.conversationButtonText, styles.endConversationButtonText, !endConversationIsEnabled && styles.endConversationButtonTextDisabled]}>
               End Conversation
             </Text>
           </TouchableOpacity>
         </View>
 
-        {lastResponseText.trim().length > 0 && (
+        {responseTextCanShow && (
           <View style={styles.responseCard}>
-            <Text style={styles.responseLabel}>David says:</Text>
+            <Text style={styles.responseLabel}>David said:</Text>
             <Text style={styles.responseText}>{lastResponseText}</Text>
           </View>
         )}
@@ -1080,10 +1036,7 @@ export default function VoiceScreen() {
                 multiline={false}
               />
               <TouchableOpacity
-                style={[
-                  styles.sendButton,
-                  sendIsDisabled && styles.sendButtonDisabled,
-                ]}
+                style={[styles.sendButton, sendIsDisabled && styles.sendButtonDisabled]}
                 onPress={handleTextSubmit}
                 disabled={sendIsDisabled}
               >
