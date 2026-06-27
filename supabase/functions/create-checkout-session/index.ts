@@ -8,6 +8,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const DEFAULT_PRO_PRICE_ID = "price_1TRTQuGDw0P2L0A1MsgZiMeM";
+
 serve(async (req) => {
   // Handle preflight
   if (req.method === "OPTIONS") {
@@ -22,17 +24,7 @@ serve(async (req) => {
   }
 
   try {
-    const body = await req.json();
-    console.log("[create-checkout-session] Received body:", JSON.stringify(body));
-    const { priceId } = body;
-
-    if (!priceId) {
-      console.error("[create-checkout-session] Error: Missing priceId");
-      return new Response(
-        JSON.stringify({ error: "Missing priceId" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const proPriceId = Deno.env.get("STRIPE_PRICE_ID_PRO") || DEFAULT_PRO_PRICE_ID;
 
     // Get user strictly from JWT to verify and get identity
     let userId: string | undefined = undefined;
@@ -96,14 +88,14 @@ serve(async (req) => {
     // Get origin for success/cancel URLs. Always return to the SPA root so React can catch the payment params.
     const origin = req.headers.get("origin") || Deno.env.get("APP_URL") || "http://localhost:3000";
     const normalizedOrigin = origin.replace(/\/$/, "");
-    console.log(`[create-checkout-session] Creating session for user: ${userId}, price: ${priceId}, origin: ${normalizedOrigin}`);
+    console.log(`[create-checkout-session] Creating Pro checkout for user: ${userId}, price: ${proPriceId}, origin: ${normalizedOrigin}`);
 
     try {
       const sessionOptions: any = {
         payment_method_types: ["card"],
         line_items: [
           {
-            price: priceId,
+            price: proPriceId,
             quantity: 1,
           },
         ],
