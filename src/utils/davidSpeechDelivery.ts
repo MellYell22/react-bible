@@ -240,5 +240,9 @@ export function preSpeechThinkingDelay(text = ''): Promise<void> {
     Math.min(1050, base + lengthAdjustment + jitter),
   );
 
-  return new Promise(resolve => window.setTimeout(resolve, delayMs));
+  return new Promise(resolve => setTimeout(resolve, delayMs));
 }
+
+export const enhanceSpeechDelivery = (text: string): string => {
+  return sanitizeForDavidSpeech(humanizeForTts(text));
+};
