@@ -6,9 +6,11 @@ export const config = {
   },
 };
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2023-10-16",
-});
+const getStripe = () => {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) throw new Error("STRIPE_SECRET_KEY is not configured.");
+  return new Stripe(secretKey, { apiVersion: "2023-10-16" as any });
+};
 
 import { buffer } from "micro";
 
@@ -22,6 +24,7 @@ export default async function handler(req: any, res: any) {
   let event;
 
   try {
+    const stripe = getStripe();
     const buf = await buffer(req);
 
     event = stripe.webhooks.constructEvent(
