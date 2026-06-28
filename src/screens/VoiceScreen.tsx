@@ -932,9 +932,9 @@ export default function VoiceScreen() {
       <View style={styles.lockedContainer}>
         <View style={styles.lockCard}>
           <Lock color="#4F46E5" size={48} style={{ marginBottom: 20 }} />
-          <Text style={styles.lockTitle}>Pro Feature</Text>
+          <Text style={styles.lockTitle}>David's Voice Pro</Text>
           <Text style={styles.lockText}>
-            Voice with David is available for Pro users.
+            Live voice with David is a David's Voice Pro feature.
           </Text>
           <TouchableOpacity
             style={[
@@ -945,10 +945,10 @@ export default function VoiceScreen() {
             disabled={upgradeLoading}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel="Upgrade to Pro"
+            accessibilityLabel="Upgrade to David's Voice Pro"
           >
             <Text style={styles.lockUpgradeButtonText}>
-              {upgradeLoading ? 'Starting checkout...' : 'Upgrade to Pro'}
+              {upgradeLoading ? 'Starting checkout...' : "Get David's Voice Pro"}
             </Text>
           </TouchableOpacity>
           <Text style={styles.lockUpgradeHint}>Unlock live voice chat with David.</Text>
