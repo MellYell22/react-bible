@@ -1,6 +1,16 @@
 # Dependencies
 node_modules
 
+# pnpm store
+.pnpm-store
+
+# Stray audio files in src
+src/screens/*.wav
+src/screens/*.mp3
+
+# Stray root-level audio files
+voice-test.wav
+
 # Build output
 dist
 
