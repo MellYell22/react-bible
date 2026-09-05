@@ -1,4 +1,6 @@
-const DAVID_ELEVENLABS_VOICE_ID = 'KdyHP7aXTUxKmw1tVBvn';
+import { Readable } from 'stream';
+
+const DAVID_ELEVENLABS_VOICE_ID = 'ewxUvnyvvOehYjKjUVKC';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 
 // Live voice stays on a low-latency model suitable for conversation.
@@ -10,13 +12,22 @@ const FAST_ELEVENLABS_MODELS = new Set([
 ]);
 const DEFAULT_ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 const requestedModel = (process.env.ELEVENLABS_MODEL || '').trim();
-const ELEVENLABS_MODEL = FAST_ELEVENLABS_MODELS.has(requestedModel)
+const FALLBACK_ELEVENLABS_MODEL = FAST_ELEVENLABS_MODELS.has(requestedModel)
   ? requestedModel
   : DEFAULT_ELEVENLABS_MODEL;
 
-if (requestedModel && ELEVENLABS_MODEL !== requestedModel) {
+// Prefer ElevenLabs v3 (most expressive) and fall back to the low-latency model
+// when v3 is unavailable for this account/voice. An explicit fast-model override
+// is honored as the single model (no v3 attempt) to preserve existing behavior.
+const ELEVENLABS_MODEL_CANDIDATES = FAST_ELEVENLABS_MODELS.has(requestedModel)
+  ? [requestedModel]
+  : ['eleven_v3', FALLBACK_ELEVENLABS_MODEL];
+// Kept for logging/diagnostics compatibility.
+const ELEVENLABS_MODEL = ELEVENLABS_MODEL_CANDIDATES[0];
+
+if (requestedModel && !FAST_ELEVENLABS_MODELS.has(requestedModel)) {
   console.warn(
-    `[Speech] Ignoring ELEVENLABS_MODEL="${requestedModel}" — not a fast live-voice model. Using ${DEFAULT_ELEVENLABS_MODEL}.`,
+    `[Speech] Ignoring ELEVENLABS_MODEL="${requestedModel}" — not a fast live-voice model. Using v3 with ${DEFAULT_ELEVENLABS_MODEL} fallback.`,
   );
 }
 
@@ -104,83 +115,97 @@ export default async function handler(req: any, res: any) {
 
   const voiceId = DAVID_ELEVENLABS_VOICE_ID;
 
+  const voiceSettings = {
+    // David should sound like someone sitting beside the user, not an
+    // announcer. Slow the cadence, keep enough variation to avoid a robotic
+    // read, and disable speaker boost so the source audio is not pushed.
+    stability: 0.62,
+    similarity_boost: 0.86,
+    speed: 0.80,
+    style: 0.0,
+    use_speaker_boost: false,
+  };
+
   try {
-    const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}?output_format=${encodeURIComponent(
+    // Stream endpoint so playback can begin as chunks arrive.
+    const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}/stream?output_format=${encodeURIComponent(
       ELEVENLABS_OUTPUT_FORMAT,
     )}`;
 
-    const requestPayload = {
-      text: cleanText,
-      model_id: ELEVENLABS_MODEL,
-      voice_settings: {
-        // David should sound like someone sitting beside the user, not an
-        // announcer. Slow the cadence, keep enough variation to avoid a robotic
-        // read, and disable speaker boost so the source audio is not pushed.
-        stability: 0.62,
-        similarity_boost: 0.86,
-        speed: 0.80,
-        style: 0.0,
-        use_speaker_boost: false,
-      },
-    };
+    let response: Response | null = null;
+    let usedModel = '';
+    let lastErrorText = '';
+    let lastStatus = 502;
 
-    console.log('[API Request] ElevenLabs text-to-speech', {
-      url: speechUrl,
-      voiceId,
-      model: ELEVENLABS_MODEL,
-      outputFormat: ELEVENLABS_OUTPUT_FORMAT,
-      textLength: cleanText.length,
-      textPreview: previewLogText(cleanText),
-      voiceSettings: requestPayload.voice_settings,
-    });
-
-    const response = await fetch(speechUrl, {
-      method: 'POST',
-      headers: {
-        'xi-api-key': apiKey,
-        'Content-Type': 'application/json',
-        Accept: 'audio/mpeg',
-      },
-      body: JSON.stringify(requestPayload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[API Response] ElevenLabs text-to-speech', {
-        ok: false,
-        status: response.status,
-        statusText: response.statusText,
-        contentType: response.headers.get('content-type'),
-        responseBodyPreview: errorText.substring(0, 1000),
-        request: {
-          voiceId,
-          model: ELEVENLABS_MODEL,
-          outputFormat: ELEVENLABS_OUTPUT_FORMAT,
-          text: cleanText,
-        },
+    for (const model of ELEVENLABS_MODEL_CANDIDATES) {
+      console.log('[API Request] ElevenLabs text-to-speech (streaming)', {
+        url: speechUrl,
+        voiceId,
+        model,
+        outputFormat: ELEVENLABS_OUTPUT_FORMAT,
+        textLength: cleanText.length,
+        textPreview: previewLogText(cleanText),
+        voiceSettings,
       });
 
-      return res.status(response.status).json({
-        error: `ElevenLabs failed (${response.status})`,
-        details: errorText,
+      const attempt = await fetch(speechUrl, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        body: JSON.stringify({ text: cleanText, model_id: model, voice_settings: voiceSettings }),
+      });
+
+      if (attempt.ok) {
+        response = attempt;
+        usedModel = model;
+        break;
+      }
+
+      lastStatus = attempt.status;
+      lastErrorText = await attempt.text();
+      console.error(`[Speech] ElevenLabs model "${model}" failed: HTTP ${attempt.status} — ${lastErrorText.substring(0, 300)}`);
+      // Fall through to the next candidate only on model-availability style errors.
+      if (attempt.status !== 400 && attempt.status !== 404 && attempt.status !== 422) {
+        break;
+      }
+    }
+
+    if (!response || !response.ok || !response.body) {
+      console.error('[API Response] ElevenLabs text-to-speech', {
+        ok: false,
+        status: lastStatus,
+        responseBodyPreview: lastErrorText.substring(0, 1000),
+      });
+      return res.status(lastStatus).json({
+        error: `ElevenLabs failed (${lastStatus})`,
+        details: lastErrorText,
       });
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    console.log('[API Response] ElevenLabs text-to-speech', {
+    console.log('[API Response] ElevenLabs text-to-speech (streaming)', {
       ok: true,
       status: response.status,
-      statusText: response.statusText,
+      model: usedModel,
       contentType: response.headers.get('content-type'),
-      audioBytes: buffer.length,
     });
 
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-David-Voice-Model', usedModel);
 
-    return res.status(200).send(buffer);
+    const nodeStream = Readable.fromWeb(response.body as any);
+    nodeStream.on('error', (err: any) => {
+      console.error('[Speech] Stream piping error:', err?.message || err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'ElevenLabs stream failed' });
+      } else {
+        res.end();
+      }
+    });
+    return nodeStream.pipe(res);
   } catch (error: any) {
     console.error('[Speech] ElevenLabs request failed', {
       errorMessage: error?.message || String(error),

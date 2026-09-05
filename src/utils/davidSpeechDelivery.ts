@@ -200,15 +200,26 @@ export function sanitizeForDavidSpeech(text: string): string {
   let t = preparePlainText(text);
   t = protectDecimalPoints(t);
 
-  // Long/stacked punctuation can create exaggerated, disconnected delivery.
-  // Treat an ellipsis as one light pause rather than a new full sentence.
-  t = t.replace(/\s*\.{2,}\s*/g, ', ');
-  t = t.replace(/!{2,}/g, '!');
-  t = t.replace(/\?{2,}/g, '?');
+  // Preserve natural sentence cadence. Periods, ellipses, and dashes are
+  // expressive punctuation that ElevenLabs renders as genuine spoken pauses,
+  // so they are KEPT rather than flattened into commas or stripped out. We only
+  // tidy runaway stacking so delivery never sounds exaggerated — the punctuation
+  // itself (and the pause it creates) always survives.
+  //
+  // Previously this collapsed "..." into a comma, turned every em/en dash into a
+  // comma, and rewrote ":" / ";" as commas. That erased the rise-and-fall of a
+  // real sentence and made David sound like one long run-on clause. The rules
+  // below keep the marks and normalise only their surrounding whitespace.
+  t = t.replace(/\s*\.{2,}\s*/g, '\u2026 '); // "..", "..." -> one ellipsis pause
+  t = t.replace(/!{2,}/g, '!'); // collapse shouting to a single (kept) "!"
+  t = t.replace(/\?{2,}/g, '?'); // collapse repeats to a single (kept) "?"
 
-  // Keep internal pauses light and conversational.
-  t = t.replace(/\s*[—–]\s*/g, ', ');
-  t = t.replace(/\s*[;:]+\s*/g, ', ');
+  // Dashes stay dashes — a normal, expressive mid-sentence pause. Normalise the
+  // en-dash to an em-dash and give it consistent spacing instead of deleting it.
+  t = t.replace(/\s*[\u2013\u2014]\s*/g, ' \u2014 ');
+  // Colons and semicolons are natural pauses too; keep them, only fix spacing.
+  t = t.replace(/\s*;\s*/g, '; ');
+  t = t.replace(/\s*:\s*/g, ': ');
   t = t.replace(/,{2,}/g, ',');
 
   // Let "I'm David" land as one complete thought without chopping the words

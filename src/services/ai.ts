@@ -924,6 +924,22 @@ export const generateSpeech = async (
     throw new Error(error.error || `David's voice audio could not be generated (${response.status}).`);
   }
 
+  // Preferred path: stream the audio through MediaSource so playback can begin
+  // while bytes are still downloading. Falls back to a fully-buffered blob URL
+  // whenever streaming is unavailable (MediaSource unsupported, no body reader,
+  // or codec not supported for this browser).
+  const streamedUrl = tryCreateStreamingAudioUrl(response);
+  if (streamedUrl) {
+    logApiResponse('POST /api/speech', {
+      ok: true,
+      status: response.status,
+      statusText: response.statusText,
+      ...getResponseHeaders(response),
+      streaming: true,
+    });
+    return streamedUrl;
+  }
+
   const blob = await response.blob();
   logApiResponse('POST /api/speech', {
     ok: true,
@@ -931,12 +947,100 @@ export const generateSpeech = async (
     statusText: response.statusText,
     ...getResponseHeaders(response),
     audioBytes: blob.size,
+    streaming: false,
   });
   if (!blob.size) {
     throw new Error("David's voice audio came back empty.");
   }
 
   return URL.createObjectURL(blob);
+};
+
+/**
+ * Build a `blob:`/MediaSource object URL that plays audio as chunks arrive.
+ * Returns null (so the caller can fall back to a buffered blob) whenever the
+ * environment cannot support progressive MP3 playback.
+ */
+const tryCreateStreamingAudioUrl = (response: Response): string | null => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const MediaSourceCtor: typeof MediaSource | undefined = (window as any).MediaSource;
+    const mimeType = 'audio/mpeg';
+    if (
+      !MediaSourceCtor ||
+      typeof MediaSourceCtor.isTypeSupported !== 'function' ||
+      !MediaSourceCtor.isTypeSupported(mimeType) ||
+      !response.body ||
+      typeof response.body.getReader !== 'function'
+    ) {
+      return null;
+    }
+
+    const mediaSource = new MediaSourceCtor();
+    const objectUrl = URL.createObjectURL(mediaSource);
+    const reader = response.body.getReader();
+
+    mediaSource.addEventListener('sourceopen', () => {
+      let sourceBuffer: SourceBuffer;
+      try {
+        sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+      } catch (err) {
+        console.warn('[Speech] MediaSource addSourceBuffer failed; ending stream.', err);
+        try { mediaSource.endOfStream(); } catch { /* noop */ }
+        return;
+      }
+
+      const queue: Uint8Array[] = [];
+      let streamDone = false;
+
+      const flushQueue = () => {
+        if (sourceBuffer.updating) return;
+        if (queue.length > 0) {
+          try {
+            sourceBuffer.appendBuffer(queue.shift() as Uint8Array);
+          } catch (err) {
+            console.warn('[Speech] appendBuffer failed:', err);
+          }
+          return;
+        }
+        if (streamDone && mediaSource.readyState === 'open') {
+          try { mediaSource.endOfStream(); } catch { /* noop */ }
+        }
+      };
+
+      sourceBuffer.addEventListener('updateend', flushQueue);
+
+      const pump = async () => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) {
+              streamDone = true;
+              flushQueue();
+              break;
+            }
+            if (value && value.byteLength) {
+              queue.push(value);
+              flushQueue();
+            }
+          }
+        } catch (err) {
+          console.warn('[Speech] Streaming pump failed:', err);
+          streamDone = true;
+          try {
+            if (mediaSource.readyState === 'open') mediaSource.endOfStream();
+          } catch { /* noop */ }
+        }
+      };
+
+      void pump();
+    }, { once: true });
+
+    return objectUrl;
+  } catch (err) {
+    console.warn('[Speech] Falling back to buffered audio; MediaSource setup failed:', err);
+    return null;
+  }
 };
 
 export const transcribeAudio = async (

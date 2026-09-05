@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
 import { supabase } from '../services/supabase';
 import { LogOut, CheckCircle2, AlertCircle, Lock, Star, Bookmark, Trash2, Check, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Settings } from 'lucide-react';
-import { createCheckoutSession, syncCheckoutSession } from '../services/stripe';
+import { createCheckoutSession, syncCheckoutSession, openCustomerPortal } from '../services/stripe';
 import { OWNER_EMAIL, hasProAccess } from '../utils/tier';
 import { PLANS } from '../constants';
 import { getSavedScriptures, toggleMemorized, deleteSavedScripture, updateScriptureCategory } from '../services/supabase';
@@ -233,6 +233,22 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
       await createCheckoutSession(plan.id as 'plus' | 'pro');
     } catch (error: any) {
       console.error(`[StripeDebug] Upgrade error: ${error.message}`);
+      setStatusMessage({ text: error.message, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    if (!profile) return;
+    setLoading(true);
+    setStatusMessage(null);
+
+    try {
+      // Opens the Stripe Customer Portal only — no billing changes are made here.
+      await openCustomerPortal();
+    } catch (error: any) {
+      console.error(`[StripeDebug] Manage subscription error: ${error.message}`);
       setStatusMessage({ text: error.message, type: 'error' });
     } finally {
       setLoading(false);
@@ -556,6 +572,24 @@ export default function ProfileScreen({ route, navigation }: { route?: { params?
           </View>
         )}
       </View>
+
+      {profile?.email !== OWNER_EMAIL
+        && (profile?.subscription_tier === 'plus' || profile?.subscription_tier === 'pro') && (
+        <TouchableOpacity
+          style={styles.manageSubscriptionButton}
+          onPress={handleManageSubscription}
+          disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel="Manage subscription"
+          activeOpacity={0.85}
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color="#0b1e3d" />
+          ) : (
+            <Text style={styles.manageSubscriptionText}>MANAGE SUBSCRIPTION</Text>
+          )}
+        </TouchableOpacity>
+      )}
 
       <TouchableOpacity
         style={styles.viewPlansButton}
@@ -1006,6 +1040,24 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: 'rgba(212, 175, 55, 0.3)',
+  },
+  manageSubscriptionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 48,
+    marginTop: 20,
+    borderRadius: 16,
+    backgroundColor: '#d4af37',
+    paddingHorizontal: 20,
+  },
+  manageSubscriptionText: {
+    fontFamily: 'Cinzel',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0b1e3d',
+    letterSpacing: 1.5,
   },
   viewPlansText: {
     fontFamily: 'Cinzel',

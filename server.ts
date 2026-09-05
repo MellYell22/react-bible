@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { Readable } from "stream";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Stripe from "stripe";
@@ -25,7 +26,7 @@ import chatHandler from './api/chat.js';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_22050_32';
-const DAVID_ELEVENLABS_VOICE_ID = 'KdyHP7aXTUxKmw1tVBvn';
+const DAVID_ELEVENLABS_VOICE_ID = 'ewxUvnyvvOehYjKjUVKC';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -677,10 +678,11 @@ app.post("/api/speech", async (req, res) => {
     return res.status(400).json({ error: 'Missing text parameter' });
   }
 
+  // Non-destructive cleanup: strip only HTML/markup and normalize whitespace.
+  // Sentence-ending punctuation (periods, ellipses), dashes, and expressive marks
+  // are preserved so David keeps a natural spoken cadence.
   const cleanText = text.trim()
-    .replace(/<[^>]+>/g, '')
-    .replace(/\.{2,}/g, '')
-    .replace(/\s*—\s*/g, ', ')
+    .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -701,76 +703,113 @@ app.post("/api/speech", async (req, res) => {
   // Pinned in code, same as api/speech.ts — see the note there.
   const voiceId = DAVID_ELEVENLABS_VOICE_ID;
 
-  // eleven_multilingual_v2: warmest, most human-sounding model. The turbo model
-  // sounded thin/robotic, so we trade a little latency for a genuinely warm voice.
-  const FAST_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2';
+  // Model preference order: ElevenLabs v3 first (most expressive), then fall back
+  // to the warm multilingual v2 model if v3 is unavailable for this account/voice.
+  // An explicit ELEVENLABS_MODEL override always wins and skips the fallback.
+  const OVERRIDE_MODEL = process.env.ELEVENLABS_MODEL;
+  const MODEL_CANDIDATES = OVERRIDE_MODEL
+    ? [OVERRIDE_MODEL]
+    : ['eleven_v3', 'eleven_multilingual_v2'];
   const FAST_FORMAT = 'mp3_44100_128'; // higher quality audio = fuller, less robotic
+  const voiceSettings = {
+    stability: 0.55,          // steadier, calmer delivery
+    similarity_boost: 0.80,
+    speed: 0.96,              // slightly slower than natural = warm, unhurried
+    style: 0.0,               // no exaggeration = stops the "yelling"/announcer feel
+    use_speaker_boost: false, // softer, more intimate
+  };
 
-  try {
-    const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}?output_format=${encodeURIComponent(FAST_FORMAT)}`;
-    const requestPayload = {
-      text: cleanText,
-      model_id: FAST_MODEL,
-      voice_settings: {
-        stability: 0.55,          // steadier, calmer delivery (was 0.42 = erratic)
-        similarity_boost: 0.80,
-        speed: 0.96,              // slightly slower than natural = warm, unhurried (was 1.06)
-        style: 0.0,               // no exaggeration = stops the "yelling"/announcer feel (was 0.2)
-        use_speaker_boost: false, // was true = over-projected/loud; off = softer, more intimate
-      },
-    };
+  // Stream directly from ElevenLabs so audio begins playing as chunks arrive.
+  const streamUrl = `${ELEVENLABS_TTS_URL}/${voiceId}/stream?output_format=${encodeURIComponent(FAST_FORMAT)}`;
 
-    console.log('[API Request] ElevenLabs text-to-speech', {
-      url: speechUrl,
-      voiceId,
-      model: FAST_MODEL,
-      outputFormat: FAST_FORMAT,
-      textLength: cleanText.length,
-      textPreview: previewLogText(cleanText),
-      voiceSettings: requestPayload.voice_settings,
-    });
-
-    const response = await fetch(speechUrl, {
+  const callElevenLabs = (model: string) =>
+    fetch(streamUrl, {
       method: 'POST',
       headers: {
         'xi-api-key': apiKey,
         'Content-Type': 'application/json',
         'Accept': 'audio/mpeg',
       },
-      body: JSON.stringify(requestPayload),
+      body: JSON.stringify({
+        text: cleanText,
+        model_id: model,
+        voice_settings: voiceSettings,
+      }),
     });
 
-    if (!response.ok) {
-      const body = await response.text();
+  try {
+    let response: Awaited<ReturnType<typeof fetch>> | null = null;
+    let usedModel = '';
+    let lastErrorBody = '';
+    let lastStatus = 502;
+
+    for (const model of MODEL_CANDIDATES) {
+      console.log('[API Request] ElevenLabs text-to-speech (streaming)', {
+        voiceId,
+        model,
+        outputFormat: FAST_FORMAT,
+        textLength: cleanText.length,
+        textPreview: previewLogText(cleanText),
+        voiceSettings,
+      });
+
+      const attempt = await callElevenLabs(model);
+      if (attempt.ok) {
+        response = attempt;
+        usedModel = model;
+        break;
+      }
+
+      lastStatus = attempt.status;
+      lastErrorBody = await attempt.text();
+      console.error(`[Speech] ElevenLabs model "${model}" failed: HTTP ${attempt.status} — ${lastErrorBody.substring(0, 300)}`);
+      // Only fall through to the next candidate on model-availability style errors.
+      if (attempt.status !== 400 && attempt.status !== 404 && attempt.status !== 422) {
+        break;
+      }
+    }
+
+    if (!response || !response.ok || !response.body) {
       console.error('[API Response] ElevenLabs text-to-speech', {
         ok: false,
-        status: response.status,
-        statusText: response.statusText,
-        contentType: response.headers.get('content-type'),
-        bodyPreview: previewLogText(body, 500),
+        status: lastStatus,
+        bodyPreview: previewLogText(lastErrorBody, 500),
       });
-      console.error(`[Speech] ElevenLabs failed: HTTP ${response.status} — ${body.substring(0, 500)}`);
-      return res.status(response.status).json({
-        error: `ElevenLabs TTS failed (${response.status})`,
-        details: body,
+      return res.status(lastStatus).json({
+        error: `ElevenLabs TTS failed (${lastStatus})`,
+        details: lastErrorBody,
       });
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    console.log('[API Response] ElevenLabs text-to-speech', {
+    console.log('[API Response] ElevenLabs text-to-speech (streaming)', {
       ok: true,
       status: response.status,
-      statusText: response.statusText,
+      model: usedModel,
       contentType: response.headers.get('content-type'),
-      audioBytes: buffer.length,
     });
+
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Length', buffer.length);
-    return res.send(buffer);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-David-Voice-Model', usedModel);
+
+    // Pipe the ElevenLabs byte stream straight to the client as it arrives.
+    const nodeStream = Readable.fromWeb(response.body as any);
+    nodeStream.on('error', (err) => {
+      console.error('[Speech] Stream piping error:', err?.message || err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'ElevenLabs stream failed' });
+      } else {
+        res.end();
+      }
+    });
+    nodeStream.pipe(res);
   } catch (error: any) {
     console.error('[Speech] ElevenLabs request failed:', error?.message || error);
-    res.status(500).json({ error: error?.message || 'ElevenLabs speech generation failed' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: error?.message || 'ElevenLabs speech generation failed' });
+    } else {
+      res.end();
+    }
   }
 });
 

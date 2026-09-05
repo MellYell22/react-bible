@@ -27,7 +27,6 @@ import {
   fonts,
   fontSize,
   tracking,
-  radius,
   spacing,
   buttons,
   glow,
@@ -371,7 +370,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: gold.a30,
-    borderRadius: radius.sm,
+    borderRadius: 18,
     backgroundColor: surfaces.sunken,
     paddingLeft: spacing.lg,
     paddingRight: spacing.xs,
@@ -399,7 +398,7 @@ const styles = StyleSheet.create({
     minWidth: 82,
     minHeight: 40,
     paddingHorizontal: spacing.md,
-    borderRadius: radius.sm,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: GOLD,
@@ -451,7 +450,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     borderWidth: 1,
     borderColor: gold.a30,
-    borderRadius: radius.sm,
+    borderRadius: 16,
     backgroundColor: surfaces.input,
   },
 
@@ -485,7 +484,7 @@ const styles = StyleSheet.create({
   verseBorder: {
     borderWidth: 1,
     borderColor: gold.a30,
-    borderRadius: radius.sm,
+    borderRadius: 24,
     backgroundColor: surfaces.input,
     paddingVertical: spacing.xxl,
     paddingHorizontal: spacing.xl,
@@ -594,6 +593,7 @@ const styles = StyleSheet.create({
 
   chatButton: {
     ...buttons.primary,
+    borderRadius: 18,
     width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -607,6 +607,7 @@ const styles = StyleSheet.create({
 
   talkButton: {
     ...buttons.secondary,
+    borderRadius: 18,
     width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',

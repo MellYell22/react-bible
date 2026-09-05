@@ -90,6 +90,51 @@ export const createCheckoutSession = async (plan: CheckoutPlan = 'pro') => {
   }
 };
 
+/**
+ * Open the Stripe Customer Portal so the user can manage their existing
+ * subscription (update payment method, cancel, view invoices). This ONLY opens
+ * the portal — it does not create, change, or cancel anything itself. All
+ * products, prices, webhooks, and billing logic are untouched.
+ */
+export const openCustomerPortal = async () => {
+  if (!supabase) {
+    throw new Error('Supabase is not configured');
+  }
+
+  try {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      throw new Error('You must be logged in to manage your subscription.');
+    }
+
+    const { supabaseUrl } = getSupabaseFunctionConfig();
+    const headers = await getAuthenticatedRequestHeaders();
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/create-customer-portal-session`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({}),
+    });
+
+    if (!response.ok) {
+      throw new Error(await getFunctionErrorMessage(response, 'Unable to open the subscription portal. Please try again.'));
+    }
+
+    const data = await response.json();
+
+    if (data?.url) {
+      window.location.assign(data.url);
+      return;
+    }
+
+    throw new Error('No portal URL received from server.');
+  } catch (error: any) {
+    console.error(`[StripeDebug] Customer portal error: ${error.message}`);
+    throw new Error(error.message || 'Unable to open the subscription portal. Please try again.');
+  }
+};
+
 export const syncCheckoutSession = async (sessionId: string) => {
   if (!sessionId) {
     throw new Error('Missing Stripe Checkout Session ID.');

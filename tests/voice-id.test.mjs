@@ -16,7 +16,7 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, "..", ...p), "utf8")
 
 const speech = read("api", "speech.ts");
 const server = read("server.ts");
-const VOICE_ID = "KdyHP7aXTUxKmw1tVBvn";
+const VOICE_ID = "ewxUvnyvvOehYjKjUVKC";
 
 test("both speech paths declare the same voice ID", () => {
   assert.ok(speech.includes(`const DAVID_ELEVENLABS_VOICE_ID = '${VOICE_ID}'`));

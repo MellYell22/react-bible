@@ -1292,16 +1292,9 @@ export default function VoiceScreen() {
     phase === 'transcribing' ||
     phase === 'thinking' ||
     phase === 'speaking';
-  const voiceWaveLabel =
-    phase === 'starting'
-      ? 'Opening microphone'
-      : phase === 'listening'
-        ? 'Listening'
-        : phase === 'greeting'
-          ? 'David starting'
-          : phase === 'speaking'
-            ? 'David speaking'
-            : 'Voice ready';
+  // The animated wave itself conveys activity; we no longer narrate the phase
+  // ("Listening" / "David speaking" / etc.) as an on-screen status indicator.
+  const voiceWaveLabel = '';
 
   return (
     <View style={styles.outerContainer}>
@@ -1312,29 +1305,28 @@ export default function VoiceScreen() {
           <Text style={styles.subtitle}>A calm spiritual companion</Text>
         </View>
 
-        <View style={styles.statusContainer}>
-          <Text style={styles.statusText}>
-            {phase === 'checking'
+        {(() => {
+          // Intermediate conversational phases (greeting/thinking/starting/
+          // listening/transcribing/speaking) intentionally show NO status text.
+          // The flow is simply: the user speaks, David processes, David responds —
+          // with no "David is listening / thinking / reflecting" narration.
+          const statusMessage =
+            phase === 'checking'
               ? 'Getting David ready...'
               : phase === 'ended'
                 ? 'Call ended. Start again when you are ready.'
-                : phase === 'greeting'
-                  ? 'David is starting the conversation...'
-                  : phase === 'thinking'
-                    ? 'David is reflecting...'
-                    : phase === 'starting'
-                      ? 'Opening your microphone...'
-                    : phase === 'listening'
-                      ? 'David is listening...'
-                    : phase === 'transcribing'
-                      ? 'Sending your words to David...'
-                    : phase === 'speaking'
-                      ? 'David is speaking...'
-                    : phase === 'error'
-                      ? 'Something needs attention before David can continue.'
-                      : 'Tap Start Conversation when you are ready to speak.'}
-          </Text>
-        </View>
+                : phase === 'error'
+                  ? 'Something needs attention before David can continue.'
+                  : phase === 'idle'
+                    ? 'Tap Start Conversation when you are ready to speak.'
+                    : '';
+          if (!statusMessage) return null;
+          return (
+            <View style={styles.statusContainer}>
+              <Text style={styles.statusText}>{statusMessage}</Text>
+            </View>
+          );
+        })()}
 
         <View
           style={[
@@ -1351,7 +1343,9 @@ export default function VoiceScreen() {
                 voiceWaveIsActive && styles.voiceWaveDotActive,
               ]}
             />
-            <Text style={styles.voiceWaveLabel}>{voiceWaveLabel}</Text>
+            {voiceWaveLabel ? (
+              <Text style={styles.voiceWaveLabel}>{voiceWaveLabel}</Text>
+            ) : null}
           </View>
           <View style={styles.voiceWave}>
             {voiceLevels.map((level, index) => (

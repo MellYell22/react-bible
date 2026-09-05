@@ -77,7 +77,9 @@ export default function ChatScreen({ navigation, route }: any) {
     const nextMessages = [...baseMessages, userMessage];
     const modelMessageIndex = nextMessages.length;
 
-    setMessages([...nextMessages, { role: 'assistant', content: 'David is reflecting…' }]);
+    // Neutral typing placeholder — no "David is reflecting/thinking" status text.
+    // The bubble simply shows a quiet ellipsis until the real reply replaces it.
+    setMessages([...nextMessages, { role: 'assistant', content: '…' }]);
     if (clearComposer) setInput('');
     setLoading(true);
 
