@@ -154,7 +154,7 @@ export const checkChatAccess = async (
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
 
-  const { data: { user } = { user: null }, error: userError } = await authClient.auth.getUser(token);
+  const { data: { user } = { user: null }, error: userError } = await (authClient.auth as any).getUser(token);
 
   if (userError || !user) {
     return deny(401, {
