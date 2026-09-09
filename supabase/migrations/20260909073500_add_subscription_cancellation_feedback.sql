@@ -9,6 +9,9 @@ create table if not exists public.subscription_cancellation_feedback (
 
 alter table public.subscription_cancellation_feedback enable row level security;
 
+drop policy if exists "users_can_submit_own_cancellation_feedback"
+on public.subscription_cancellation_feedback;
+
 create policy "users_can_submit_own_cancellation_feedback"
 on public.subscription_cancellation_feedback
 for insert
