@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { Analytics } from '@vercel/analytics/react';
-import { initAnalytics, trackEvent } from './services/analytics';
+import { initAnalytics, recordAppSession, trackEvent } from './services/analytics';
 import { UserProvider, useUser } from './UserContext';
 import AuthScreen from './screens/AuthScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
@@ -64,6 +64,12 @@ function AppShell() {
       trackEvent('checkout_completed');
     }
   }, [route.name, route.params?.paymentSuccess]);
+
+  useEffect(() => {
+    if (!loading) {
+      recordAppSession(session?.user?.id);
+    }
+  }, [loading, session?.user?.id]);
 
   useEffect(() => {
     setOnboardingCompletedLocally(false);

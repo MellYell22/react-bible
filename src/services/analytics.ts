@@ -13,6 +13,7 @@ import { track } from '@vercel/analytics';
  */
 
 export type FunnelEvent =
+  | 'app_session'
   | 'signup'
   | 'chat_limit_reached'
   | 'checkout_started'
@@ -75,4 +76,46 @@ export const trackEvent = (event: FunnelEvent, props: Props = {}): void => {
   } catch (error) {
     console.warn('[analytics] event dropped:', event, error);
   }
+};
+
+
+const LAST_VISIT_KEY = 'bms_last_visit_at';
+const SESSION_RECORDED_KEY = 'bms_session_recorded';
+
+const getStorage = (kind: 'local' | 'session'): Storage | null => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    return kind === 'local' ? window.localStorage : window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
+const daysBetween = (earlier: string, later: string): number | null => {
+  const earlierTime = Date.parse(earlier);
+  const laterTime = Date.parse(later);
+  if (!Number.isFinite(earlierTime) || !Number.isFinite(laterTime)) return null;
+
+  return Math.max(0, Math.floor((laterTime - earlierTime) / 86_400_000));
+};
+
+/** Records one privacy-friendly session per browser tab session. */
+export const recordAppSession = (userId?: string | null): void => {
+  const localStorage = getStorage('local');
+  const sessionStorage = getStorage('session');
+  if (!localStorage || !sessionStorage) return;
+  if (sessionStorage.getItem(SESSION_RECORDED_KEY) === 'true') return;
+
+  const now = new Date().toISOString();
+  const previousVisit = localStorage.getItem(LAST_VISIT_KEY);
+
+  trackEvent('app_session', {
+    visitor_status: previousVisit ? 'returning' : 'new',
+    account_type: userId && userId !== 'guest' ? 'signed_in' : 'guest',
+    days_since_previous_visit: previousVisit ? daysBetween(previousVisit, now) ?? 0 : 0,
+  });
+
+  localStorage.setItem(LAST_VISIT_KEY, now);
+  sessionStorage.setItem(SESSION_RECORDED_KEY, 'true');
 };
