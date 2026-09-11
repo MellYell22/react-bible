@@ -5,7 +5,7 @@ import { useUser } from '../UserContext';
 import { supabase, deleteSavedScripture, getSavedScriptures, toggleMemorized, updateScriptureCategory } from '../services/supabase';
 import { SavedScripture } from '../types';
 import { APP_COLORS, APP_FONTS } from '../designSystem';
-import { openCustomerPortal } from '../services/stripe';
+import { requestSubscription, SubscriptionStatus } from '../services/stripe';
 import { OWNER_EMAIL, hasProAccess } from '../utils/tier';
 
 const SUPPORT_EMAIL = 'contact@aa-designs.com';
@@ -33,6 +33,10 @@ export default function ProfileScreen({ navigation }: any) {
   const [cancellationReason, setCancellationReason] = useState<string | null>(null);
   const [cancellationDetails, setCancellationDetails] = useState('');
   const [submittingCancellationFeedback, setSubmittingCancellationFeedback] = useState(false);
+
+  const [billing, setBilling] = useState<SubscriptionStatus | null>(null);
+  const [loadingBilling, setLoadingBilling] = useState(false);
+  const [confirmCancellation, setConfirmCancellation] = useState(false);
 
   const tier = profile?.subscription_tier;
   const isOwner = profile?.email?.toLowerCase() === OWNER_EMAIL.toLowerCase() || tier === 'owner';
@@ -70,18 +74,28 @@ export default function ProfileScreen({ navigation }: any) {
 
   const toggleSection = (next: Exclude<Section, null>) => setSection((current) => current === next ? null : next);
 
-  const handleSubscription = async () => {
-    if (!isPaid || profile?.id === 'guest') {
-      navigation?.navigate('Pricing');
-      return;
-    }
+  const loadSubscription = async () => {
+    setLoadingBilling(true);
+    setStatus(null);
+    try { setBilling(await requestSubscription('status')); }
+    catch (error: any) { setStatus(error.message); }
+    finally { setLoadingBilling(false); }
+  };
 
+  useEffect(() => {
+    if (section === 'subscription' && isPaid && !isOwner) void loadSubscription();
+  }, [section, profile?.id]);
+
+  const cancelSubscription = async () => {
+    if (submittingCancellationFeedback) return;
+    setSubmittingCancellationFeedback(true);
     setStatus(null);
     try {
-      await openCustomerPortal();
-    } catch (error: any) {
-      setStatus(error?.message || 'Unable to open subscription management right now.');
-    }
+      setBilling(await requestSubscription('cancel'));
+      setConfirmCancellation(false);
+      setStatus('Your subscription has been canceled. Access continues until the end of your paid period.');
+    } catch (error: any) { setStatus(error.message); }
+    finally { setSubmittingCancellationFeedback(false); }
   };
 
   const beginCancellationFlow = () => {
@@ -109,7 +123,7 @@ export default function ProfileScreen({ navigation }: any) {
       }
 
       setShowCancellationFeedback(false);
-      await handleSubscription();
+      setConfirmCancellation(true);
     } finally {
       setSubmittingCancellationFeedback(false);
     }
@@ -166,10 +180,18 @@ export default function ProfileScreen({ navigation }: any) {
             <Text style={styles.helpText}>Current plan: {isOwner ? 'OWNER' : (profile?.subscription_tier || 'free').toUpperCase()}</Text>
             {isPaid && !isOwner ? (
               <>
-                <Text style={styles.subscriptionNote}>You can update billing details, view invoices, change plans, or cancel your subscription through Stripe.</Text>
-                <TouchableOpacity style={styles.cancelButton} onPress={beginCancellationFlow}>
+                <Text style={styles.subscriptionNote}>{loadingBilling ? 'Loading subscription…' : billing ? `${billing.cancelAtPeriodEnd ? 'Canceled — access ends' : billing.status + ' — current period ends'} ${new Date(billing.currentPeriodEnd * 1000).toLocaleDateString()}` : 'Subscription status could not be loaded.'}</Text>
+                {!billing && !loadingBilling && <TouchableOpacity onPress={loadSubscription}><Text style={styles.refreshText}>RETRY</Text></TouchableOpacity>}
+                {confirmCancellation && <View>
+                  <Text style={styles.helpText}>Cancel renewal? Your access continues through the paid period shown above.</Text>
+                  <TouchableOpacity style={styles.cancelButton} onPress={cancelSubscription} disabled={submittingCancellationFeedback}>
+                    <Text style={styles.cancelButtonText}>{submittingCancellationFeedback ? 'CANCELING…' : 'CONFIRM CANCELLATION'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setConfirmCancellation(false)} disabled={submittingCancellationFeedback}><Text style={styles.helpText}>KEEP SUBSCRIPTION</Text></TouchableOpacity>
+                </View>}
+                {!confirmCancellation && !billing?.cancelAtPeriodEnd && (!billing || ['active', 'trialing', 'past_due'].includes(billing.status)) && <TouchableOpacity style={styles.cancelButton} onPress={beginCancellationFlow} disabled={loadingBilling}>
                   <Text style={styles.cancelButtonText}>CANCEL SUBSCRIPTION</Text>
-                </TouchableOpacity>
+                </TouchableOpacity>}
               </>
             ) : isOwner ? (
               <Text style={styles.subscriptionNote}>Owner access does not have a cancellable subscription.</Text>
@@ -266,7 +288,7 @@ export default function ProfileScreen({ navigation }: any) {
         onRequestClose={() => !submittingCancellationFeedback && setShowCancellationFeedback(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+          <ScrollView style={styles.modalCard}>
             <Text style={styles.modalEyebrow}>SUBSCRIPTION FEEDBACK</Text>
             <Text style={styles.modalTitle}>Before you go</Text>
             <Text style={styles.modalQuestion}>Why do you want to change or cancel your subscription?</Text>
@@ -310,7 +332,7 @@ export default function ProfileScreen({ navigation }: any) {
               {submittingCancellationFeedback ? (
                 <ActivityIndicator color={APP_COLORS.navyDeep} />
               ) : (
-                <Text style={styles.continueCancelButtonText}>CONTINUE TO SUBSCRIPTION OPTIONS</Text>
+                <Text style={styles.continueCancelButtonText}>CONTINUE TO CANCELLATION</Text>
               )}
             </TouchableOpacity>
 
@@ -329,7 +351,7 @@ export default function ProfileScreen({ navigation }: any) {
             >
               <Text style={styles.keepSubscriptionText}>GO BACK</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </>

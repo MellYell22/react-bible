@@ -40,8 +40,8 @@ const getSafeAppOrigin = (req: Request): string | null => {
 /**
  * Opens the Stripe Customer Portal for the signed-in user so they can manage
  * their existing subscription (update card, view invoices, cancel). This function
- * ONLY creates a billing portal session — it never creates, changes, or cancels a
- * subscription itself, and it does not touch products, prices, or webhooks.
+ * also reads subscription status and schedules authenticated, confirmed
+ * cancellations for the end of the paid period.
  */
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -53,7 +53,8 @@ serve(async (req) => {
     const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
     const appOrigin = getSafeAppOrigin(req);
 
-    if (!authHeader || !supabaseUrl || !stripeSecretKey || !appOrigin) {
+    if (!authHeader) return json({ error: "Please sign in to manage your subscription." }, 401);
+    if (!supabaseUrl || !stripeSecretKey) {
       console.error("[create-customer-portal-session] Missing required server configuration.");
       return json({ error: "Subscription management is temporarily unavailable because billing is not fully configured." }, 500);
     }
@@ -70,7 +71,7 @@ serve(async (req) => {
 
     const { data: profile, error: profileError } = await authClient
       .from("profiles")
-      .select("id, email, stripe_customer_id")
+      .select("id, email, stripe_customer_id, stripe_subscription_id, subscription_tier")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -98,6 +99,31 @@ serve(async (req) => {
       return json({ error: "No active subscription was found for this account." }, 409);
     }
 
+    const body = await req.json().catch(() => ({}));
+    const action = body.action || 'portal';
+    if (!['portal', 'status', 'cancel'].includes(action)) return json({ error: 'Invalid billing action.' }, 400);
+    if (action !== 'portal') {
+      const subscriptions = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 100 });
+      const subscription = subscriptions.data.find((item) => item.id === profile.stripe_subscription_id)
+        || subscriptions.data.find((item) => ['active', 'trialing', 'past_due'].includes(item.status));
+      if (!subscription) return json({ error: 'No Stripe subscription is linked to this account. Please contact support.' }, 409);
+      let current = subscription;
+      if (action === 'cancel') {
+        if (body.confirm !== true) return json({ error: 'Please confirm cancellation first.' }, 400);
+        if (!['active', 'trialing', 'past_due'].includes(current.status)) return json({ error: 'This subscription is already ended.' }, 409);
+        if (!current.cancel_at_period_end) {
+          current = await stripe.subscriptions.update(current.id, { cancel_at_period_end: true });
+        }
+      }
+      return json({
+        status: current.status,
+        cancelAtPeriodEnd: current.cancel_at_period_end,
+        currentPeriodEnd: current.current_period_end,
+        plan: profile.subscription_tier,
+      });
+    }
+
+    if (!appOrigin) return json({ error: "Subscription portal return URL is not configured." }, 503);
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: `${appOrigin}/`,

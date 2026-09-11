@@ -155,3 +155,27 @@ export const syncCheckoutSession = async (sessionId: string) => {
 
   return response.json();
 };
+
+export type SubscriptionStatus = {
+  status: string;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: number;
+  plan: string;
+};
+
+export const requestSubscription = async (action: 'status' | 'cancel'): Promise<SubscriptionStatus> => {
+  const { supabaseUrl } = getSupabaseFunctionConfig();
+  const headers = await getAuthenticatedRequestHeaders();
+  let response: Response;
+  try {
+    response = await fetch(`${supabaseUrl}/functions/v1/create-customer-portal-session`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ action, confirm: action === 'cancel' }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    throw new Error('Unable to reach subscription management. Please check your connection and retry.');
+  }
+  if (!response.ok) throw new Error(await getFunctionErrorMessage(response, 'Unable to load your subscription. Please retry.'));
+  return response.json();
+};
