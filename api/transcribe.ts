@@ -1,3 +1,4 @@
+import { isMeaningfulTranscript } from '../src/utils/voiceTranscript.mjs';
 import OpenAI from 'openai';
 import {
   getOpenAIApiKey,
@@ -6,52 +7,10 @@ import {
   OPENAI_API_KEY_ENV_NAME,
 } from '../lib/openaiEnv.js';
 
-const JUNK_TRANSCRIPT_PATTERNS = [
-  /^[\s.…,!?*-]+$/,
-  /^(thank you|thanks for watching|subscribe|you|bye|goodbye|okay|ok|um+|uh+|hmm+|ah+|oh+)[.!?\s]*$/i,
-  /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
-  /^(the|a|an|i|it|so|and|but|or|well)[.!?\s]*$/i,
-];
-
-const NOISE_TRANSCRIPT_PATTERNS = [
-  /^(a+h*|u+h*m*|hmm*|mm+|mhm+|uh+h*|oh+h*)[.!?\s]*$/i,
-  /^(cough|coughing|\*cough\*|sniff|sniffle|sniffling|sneeze|sneezing|achoo|burp|burping|yawn|yawning|ahem)[.!?\s]*$/i,
-  /^(laugh|laughing|laughter|ha(?:\s+ha)+|giggle|giggling|chuckle|chuckling)[.!?\s]*$/i,
-  /^(clears? throat|clearing throat|throat clear|throat clearing)[.!?\s]*$/i,
-  /^(breathing|breath|inhales?|exhales?|sigh|sighs|sighing|hiccup|hiccups|hiccuping)[.!?\s]*$/i,
-  /^(background noise|room noise|noise|static)[.!?\s]*$/i,
-  /^\[.*\]$/,
-  /^\(.*\)$/,
-];
-
-// One intentional word such as "sad", "help", "yes", or "scared" is a real
-// voice turn. Noise is rejected by the explicit patterns and confidence checks
-// instead of by requiring two words.
-const MIN_MEANINGFUL_WORDS = 1;
-const MIN_MEANINGFUL_LETTERS = 3;
 const MIN_AUDIO_BYTES = 5000;
 
 function previewLogText(value: string, maxLength = 180): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
-
-function isJunkTranscript(normalized: string): boolean {
-  if (!normalized || normalized.length < 3) return true;
-  if (JUNK_TRANSCRIPT_PATTERNS.some(re => re.test(normalized))) return true;
-  if (NOISE_TRANSCRIPT_PATTERNS.some(re => re.test(normalized))) return true;
-  const words = normalized.split(/\s+/).filter(Boolean);
-  if (words.length === 1 && words[0].replace(/[^a-z]/gi, '').length < 3) return true;
-  return false;
-}
-
-function isMeaningfulTranscript(transcript: string): boolean {
-  const normalized = transcript.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (isJunkTranscript(normalized)) return false;
-  const words = transcript.trim().split(/\s+/).filter(Boolean);
-  if (words.length < MIN_MEANINGFUL_WORDS) return false;
-  const letters = transcript.replace(/[^a-zA-Z]/g, '');
-  if (letters.length < MIN_MEANINGFUL_LETTERS) return false;
-  return true;
 }
 
 function sanitizeTranscript(raw: string): { transcript: string; rejected?: boolean; reason?: string } {

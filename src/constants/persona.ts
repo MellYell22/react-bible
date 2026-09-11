@@ -210,13 +210,11 @@ export const DAVID_FIRST_TIME_GREETINGS = [
  */
 export const DAVID_RETURNING_GREETINGS = [
   "Hey... good to see you.",
-  "There you are.",
   "Hey, how's today been?",
   "Hey — good to see you again.",
   "Hey you... what's going on today?",
   "Hey. How are you holding up?",
   "Good to hear from you... what's on your mind?",
-  "There you are... how's your day been?",
   "Hey. How's things?",
   "Hey... anything happen since we talked?",
   "Hey there. What's new?",
@@ -230,7 +228,6 @@ export const DAVID_RETURNING_AFTER_GAP_GREETINGS = [
   "Hey... it's been a little while. I'm glad you're here.",
   "Hey, stranger... good to see you.",
   "Hey — it's been a minute. How've you been?",
-  "There you are... it's been a while. Glad you're back.",
   "Hey. Been a while... catch me up.",
 ];
 

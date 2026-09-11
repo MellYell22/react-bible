@@ -1,3 +1,4 @@
+import { isMeaningfulTranscript } from './src/utils/voiceTranscript.mjs';
 import { DAVID_VOICE_SETTINGS, DAVID_DEFAULT_MODEL } from './src/utils/davidVoiceSettings.js';
 import { sanitizeForDavidSpeech } from './src/utils/davidSpeechDelivery.js';
 import dotenv from "dotenv";
@@ -579,32 +580,6 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
     const audioFile = new File([audioBuffer], safeFilename, { type: mimeType });
 
     const MIN_AUDIO_BYTES = 5000;
-    const MIN_MEANINGFUL_WORDS = 2;
-    const MIN_MEANINGFUL_LETTERS = 8;
-    const junkPatterns = [
-      /^[\s.…,!?*-]+$/,
-      /^(thank you|thanks for watching|subscribe|you|bye|goodbye|okay|ok|um+|uh+|hmm+|ah+|oh+)[.!?\s]*$/i,
-      /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
-      /^(the|a|an|i|it|so|and|but|or|well)[.!?\s]*$/i,
-    ];
-    const noisePatterns = [
-      /^(a+h*|u+h*m*|hmm*|mm+|mhm+|uh+h*|oh+h*)[.!?\s]*$/i,
-      /^(cough|coughing|\*cough\*|clears? throat|sniff|sneeze|burp|yawn)[.!?\s]*$/i,
-      /^(breathing|inhales?|exhales?|sigh|sighs)[.!?\s]*$/i,
-      /^\[.*\]$/,
-    ];
-
-    const isMeaningful = (text: string): boolean => {
-      const t = text.trim();
-      const n = t.toLowerCase();
-      if (!t || n.length < 3) return false;
-      if (junkPatterns.some(re => re.test(n)) || noisePatterns.some(re => re.test(n))) return false;
-      const words = t.split(/\s+/).filter(Boolean);
-      if (words.length < MIN_MEANINGFUL_WORDS) return false;
-      if (t.replace(/[^a-zA-Z]/g, '').length < MIN_MEANINGFUL_LETTERS) return false;
-      return true;
-    };
-
     if (audioBuffer.length < MIN_AUDIO_BYTES) {
       return res.json({ transcript: '', rejected: true, reason: 'audio_too_small' });
     }
@@ -649,7 +624,7 @@ app.post("/api/transcribe", express.raw({ type: '*/*', limit: '25mb' }), async (
     } else {
       rawTranscript = transcription.text?.trim() || '';
     }
-    const accepted = isMeaningful(rawTranscript);
+    const accepted = isMeaningfulTranscript(rawTranscript);
     console.log('[API Response] OpenAI audio.transcriptions.create', {
       transcriptLength: rawTranscript.length,
       transcriptPreview: previewLogText(rawTranscript),
@@ -702,14 +677,8 @@ app.post("/api/speech", async (req, res) => {
   // Pinned in code, same as api/speech.ts — see the note there.
   const voiceId = DAVID_ELEVENLABS_VOICE_ID;
 
-  // Model preference order: ElevenLabs v3 first (most expressive), then fall back
-  // to DAVID_DEFAULT_MODEL — the warm multilingual v2 model — when v3 is not
-  // available for this account/voice. An explicit ELEVENLABS_MODEL override
-  // always wins and skips the fallback.
-  const OVERRIDE_MODEL = process.env.ELEVENLABS_MODEL;
-  const MODEL_CANDIDATES = OVERRIDE_MODEL
-    ? [OVERRIDE_MODEL]
-    : ['eleven_v3', DAVID_DEFAULT_MODEL];
+  // Match user-selected sample C exactly; environment cannot select v3.
+  const MODEL_CANDIDATES = [DAVID_DEFAULT_MODEL];
   const FAST_FORMAT = 'mp3_44100_128'; // higher quality audio = fuller, less robotic
   // Stream directly from ElevenLabs so audio begins playing as chunks arrive.
   const streamUrl = `${ELEVENLABS_TTS_URL}/${voiceId}/stream?output_format=${encodeURIComponent(FAST_FORMAT)}`;

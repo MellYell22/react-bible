@@ -1,3 +1,4 @@
+import { isMeaningfulTranscript } from '../utils/voiceTranscript.mjs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Platform,
@@ -136,27 +137,7 @@ const isMeaningfulUserText = (value: string, source: 'voice' | 'typed' = 'voice'
   // keep mic artifacts (coughs, TV, room tone) from becoming a turn.
   if (source === 'typed') return /[a-zA-Z0-9]/.test(text);
 
-  const lowered = text.toLowerCase();
-  // Short conversational replies ("yeah", "okay", "not really", "thanks",
-  // "I'm tired") are real turns and must reach David. Only pure filler
-  // vocalizations and nonverbal noise are filtered here.
-  const junkPatterns = [
-    /^[\s.…,!?*-]+$/,
-    /^(um+|uh+|mm+|mhm+|ah+|er+)[.!?\s]*$/i,
-    /^(music|applause|\[silence\]|\[music\]|\[inaudible\])$/i,
-    /^(cough|coughing|sniff|sniffle|sniffling|sneeze|sneezing|achoo|ahem|yawn|yawning)[.!?\s]*$/i,
-    /^(laugh|laughing|laughter|giggle|giggling|chuckle|chuckling)[.!?\s]*$/i,
-    /^(clear(?:s|ed|ing)? throat|throat clear(?:ing)?|sigh|sighing|breath|breathing|inhale|exhale)[.!?\s]*$/i,
-    /^(background noise|room noise|noise|static|television|tv)[.!?\s]*$/i,
-  ];
-
-  if (junkPatterns.some(pattern => pattern.test(lowered))) return false;
-
-  // One meaningful word is enough in a live conversation. Requiring two words
-  // caused perfectly valid replies such as "hello", "sad", and "help" to be
-  // discarded, which made David look unresponsive.
-  const letters = text.replace(/[^a-zA-Z]/g, '');
-  return letters.length >= 2;
+  return isMeaningfulTranscript(text);
 };
 
 export default function VoiceScreen() {

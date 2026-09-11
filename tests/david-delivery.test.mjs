@@ -25,26 +25,11 @@ test('intentional ellipses survive repeated speech cleanup', () => {
   }
 });
 
-test('David introduction is spoken as one natural thought with a soft pause', () => {
-  assert.equal(
-    sanitizeForDavidSpeech("Hey. I'm David. What's on your mind?"),
-    "Hey, I'm David... What's on your mind?",
-  );
-  assert.equal(
-    sanitizeForDavidSpeech("Hi, I'm David. How are you today?"),
-    "Hi, I'm David... How are you today?",
-  );
-  assert.equal(
-    sanitizeForDavidSpeech("Hey there. I'm David. Take your time — where do you want to start?"),
-    "Hey there, I'm David... Take your time — where do you want to start?",
-  );
-});
-
-test('short conversational lead-ins get a softer spoken beat instead of a clipped stop', () => {
-  assert.equal(sanitizeForDavidSpeech("Yeah. That's hard."), "Yeah... That's hard.");
-  assert.equal(sanitizeForDavidSpeech("Okay. What happened?"), "Okay... What happened?");
-  assert.equal(sanitizeForDavidSpeech("Hey. What's going on?"), "Hey... What's going on?");
-  assert.equal(sanitizeForDavidSpeech("Hi. How are you feeling today?"), "Hi... How are you feeling today?");
+test('approved sample C preserves plain punctuation without injected pauses', () => {
+  for (const text of ["Okay. What do you think is making you feel that way?", "Hey. I'm David. What's on your mind?", "Yeah. That's hard.", "How are you doing today?"]) {
+    assert.equal(sanitizeForDavidSpeech(text), text);
+    assert.equal(sanitizeForDavidSpeech(sanitizeForDavidSpeech(text)), text);
+  }
 });
 
 test('leading filler sounds never reach David display or speech', () => {
