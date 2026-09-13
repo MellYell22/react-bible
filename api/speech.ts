@@ -1,51 +1,33 @@
+import { Readable } from 'node:stream';
+import { sanitizeForDavidSpeech } from '../src/utils/davidSpeechDelivery.js';
+import {
+  DAVID_DEFAULT_MODEL,
+  DAVID_DEFAULT_OUTPUT_FORMAT,
+  DAVID_FAST_MODELS,
+  DAVID_FAST_OUTPUT_FORMATS,
+  DAVID_VOICE_SETTINGS,
+} from '../src/utils/davidVoiceSettings.js';
+
 const DAVID_ELEVENLABS_VOICE_ID = 'ewxUvnyvvOehYjKjUVKC';
 const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 
-// Live voice must stay on a low-latency model. An env var can pick between
-// fast models, but it can never silently downgrade David to a slow one.
-const FAST_ELEVENLABS_MODELS = new Set([
-  'eleven_flash_v2_5',
-  'eleven_flash_v2',
-  'eleven_turbo_v2_5',
-  'eleven_turbo_v2',
-]);
-// Turbo keeps flash-level latency but has noticeably better prosody: it holds a
-// sentence together instead of clipping each clause. Flash was a large part of
-// why David sounded like he was reading a list.
-const DEFAULT_ELEVENLABS_MODEL = 'eleven_turbo_v2_5';
+// An env var can pick between fast models, but it can never silently
+// downgrade David to a slow one.
 const requestedModel = (process.env.ELEVENLABS_MODEL || '').trim();
-const ELEVENLABS_MODEL = FAST_ELEVENLABS_MODELS.has(requestedModel)
+const ELEVENLABS_MODEL = DAVID_FAST_MODELS.has(requestedModel)
   ? requestedModel
-  : DEFAULT_ELEVENLABS_MODEL;
+  : DAVID_DEFAULT_MODEL;
 if (requestedModel && ELEVENLABS_MODEL !== requestedModel) {
-  console.warn(`[Speech] Ignoring ELEVENLABS_MODEL="${requestedModel}" — not a fast live-voice model. Using ${DEFAULT_ELEVENLABS_MODEL}.`);
+  console.warn(`[Speech] Ignoring ELEVENLABS_MODEL="${requestedModel}" — not a fast live-voice model. Using ${DAVID_DEFAULT_MODEL}.`);
 }
 
-// Lightweight mp3 formats only, so web playback can start quickly.
-const FAST_OUTPUT_FORMATS = new Set([
-  'mp3_22050_32',
-  'mp3_44100_32',
-  'mp3_44100_64',
-  'mp3_44100_96',
-]);
-// mp3_22050_32 is where much of the thin, brittle quality came from. 44100_64
-// is still a small payload but keeps the warmth in his lower register.
-const DEFAULT_OUTPUT_FORMAT = 'mp3_44100_64';
 const requestedOutputFormat = (process.env.ELEVENLABS_OUTPUT_FORMAT || '').trim();
-const ELEVENLABS_OUTPUT_FORMAT = FAST_OUTPUT_FORMATS.has(requestedOutputFormat)
+const ELEVENLABS_OUTPUT_FORMAT = DAVID_FAST_OUTPUT_FORMATS.has(requestedOutputFormat)
   ? requestedOutputFormat
-  : DEFAULT_OUTPUT_FORMAT;
+  : DAVID_DEFAULT_OUTPUT_FORMAT;
 if (requestedOutputFormat && ELEVENLABS_OUTPUT_FORMAT !== requestedOutputFormat) {
-  console.warn(`[Speech] Ignoring ELEVENLABS_OUTPUT_FORMAT="${requestedOutputFormat}" — not a lightweight web format. Using ${DEFAULT_OUTPUT_FORMAT}.`);
+  console.warn(`[Speech] Ignoring ELEVENLABS_OUTPUT_FORMAT="${requestedOutputFormat}" — not a lightweight web format. Using ${DAVID_DEFAULT_OUTPUT_FORMAT}.`);
 }
-
-// The client already runs every reply through prepareDavidTtsPayload() before
-// posting here. Re-running humanizeForTts() on the server was re-processing
-// already-prepared text AND silently truncating David to three sentences.
-// sanitizeForDavidSpeech() is the correct final-stage pass: safe to run on
-// prepared text, strips the ellipses that make ElevenLabs insert long breathing
-// pauses, and never cuts his reply short.
-import { sanitizeForDavidSpeech } from '../src/utils/davidSpeechDelivery.js';
 
 function previewLogText(value: string, maxLength = 180): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -73,6 +55,10 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'Missing text' });
   }
 
+  // The client already runs every reply through prepareDavidTtsPayload().
+  // sanitizeForDavidSpeech() is the correct final-stage pass: safe on prepared
+  // text, strips the ellipses that make ElevenLabs insert long breathing
+  // pauses, and never cuts his reply short.
   let cleanText = cleanTranscript(text);
   cleanText = sanitizeForDavidSpeech(cleanText);
 
@@ -91,33 +77,29 @@ export default async function handler(req: any, res: any) {
 
   const voiceId = process.env.ELEVENLABS_VOICE_ID || DAVID_ELEVENLABS_VOICE_ID;
 
+  // STREAMING ENDPOINT. The previous version called the non-streaming URL and
+  // buffered the entire mp3 before sending a single byte, so the client's
+  // MediaSource streaming path never actually streamed in production — users
+  // sat in silence until the whole clip had been generated. This mirrors the
+  // local dev server: ElevenLabs bytes are piped straight through as they
+  // arrive, so David starts talking after the first chunk, not the last.
+  const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}/stream?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`;
+
+  const requestPayload = {
+    text: cleanText,
+    model_id: ELEVENLABS_MODEL,
+    voice_settings: DAVID_VOICE_SETTINGS,
+  };
+
   try {
-    const speechUrl = `${ELEVENLABS_TTS_URL}/${voiceId}?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`;
-
-    const requestPayload = {
-      text: cleanText,
-      model_id: ELEVENLABS_MODEL,
-      voice_settings: {
-        // Lower stability = more natural pitch and pace variation. The old
-        // 0.72 is what flattened him into a monotone reader.
-        stability: 0.42,
-        similarity_boost: 0.88,
-        // Marginally above neutral — reads as live, not rushed.
-        speed: 1.06,
-        // Style above ~0.3 exaggerates emphasis and adds clipped stops.
-        style: 0.2,
-        use_speaker_boost: true,
-      },
-    };
-
-    console.log('[API Request] ElevenLabs text-to-speech', {
+    console.log('[API Request] ElevenLabs text-to-speech (streaming)', {
       url: speechUrl,
       voiceId,
       model: ELEVENLABS_MODEL,
       outputFormat: ELEVENLABS_OUTPUT_FORMAT,
       textLength: cleanText.length,
       textPreview: previewLogText(cleanText),
-      voiceSettings: requestPayload.voice_settings,
+      voiceSettings: DAVID_VOICE_SETTINGS,
     });
 
     const response = await fetch(speechUrl, {
@@ -130,8 +112,8 @@ export default async function handler(req: any, res: any) {
       body: JSON.stringify(requestPayload),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
+    if (!response.ok || !response.body) {
+      const errorText = await response.text().catch(() => '');
       console.error('[API Response] ElevenLabs text-to-speech', {
         ok: false,
         status: response.status,
@@ -146,26 +128,39 @@ export default async function handler(req: any, res: any) {
         },
       });
 
-      return res.status(response.status).json({
+      return res.status(response.status || 502).json({
         error: `ElevenLabs failed (${response.status})`,
         details: errorText,
       });
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    console.log('[API Response] ElevenLabs text-to-speech', {
+    console.log('[API Response] ElevenLabs text-to-speech (streaming)', {
       ok: true,
       status: response.status,
       statusText: response.statusText,
       contentType: response.headers.get('content-type'),
-      audioBytes: buffer.length,
     });
 
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-David-Voice-Model', ELEVENLABS_MODEL);
+    res.status(200);
 
-    return res.status(200).send(buffer);
+    const nodeStream = Readable.fromWeb(response.body as any);
+    nodeStream.on('error', (err: any) => {
+      console.error('[Speech] Stream piping error:', err?.message || err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'ElevenLabs stream failed' });
+      } else {
+        res.end();
+      }
+    });
+
+    await new Promise<void>((resolve) => {
+      res.on('close', resolve);
+      res.on('finish', resolve);
+      nodeStream.pipe(res);
+    });
   } catch (error: any) {
     console.error('[Speech] ElevenLabs request failed', {
       errorMessage: error?.message || String(error),
@@ -179,15 +174,18 @@ export default async function handler(req: any, res: any) {
       apiKeyPresent: !!process.env.ELEVENLABS_API_KEY,
     });
 
-    return res.status(500).json({
-      error: 'TTS failed',
-      details: error?.message || String(error),
-      request: {
-        voiceId,
-        model: ELEVENLABS_MODEL,
-        outputFormat: ELEVENLABS_OUTPUT_FORMAT,
-        textPreview: cleanText.substring(0, 1000),
-      },
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        error: 'TTS failed',
+        details: error?.message || String(error),
+        request: {
+          voiceId,
+          model: ELEVENLABS_MODEL,
+          outputFormat: ELEVENLABS_OUTPUT_FORMAT,
+          textPreview: cleanText.substring(0, 1000),
+        },
+      });
+    }
+    res.end();
   }
 }
