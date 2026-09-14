@@ -215,7 +215,6 @@ export const DAVID_RETURNING_GREETINGS = [
   "Hey you... what's going on today?",
   "Hey. How are you holding up?",
   "Good to hear from you... what's on your mind?",
-  "Hey. How's things?",
   "Hey... anything happen since we talked?",
   "Hey there. What's new?",
   "Good to see you... where do you want to start?",
