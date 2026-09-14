@@ -218,7 +218,6 @@ export const DAVID_RETURNING_GREETINGS = [
   "Hey... anything happen since we talked?",
   "Hey there. What's new?",
   "Good to see you... where do you want to start?",
-  "Hey — I was wondering how you were doing.",
   "Hey. Talk to me — how's today been?",
 ];
 
