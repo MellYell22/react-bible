@@ -10,7 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { Globe, Menu, Search, User, Settings, Apple } from 'lucide-react';
+import { Globe, Menu, Search, User, Settings } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { FullScreenBackground } from '../components/FullScreenBackground';
 import { useUser } from '../UserContext';
@@ -32,6 +32,12 @@ export default function AuthScreen() {
 
   const handleAuth = async () => {
     setError(null);
+
+    if (!supabase) {
+      setError('Sign in is temporarily unavailable. Please continue as guest and try again shortly.');
+      return;
+    }
+
     if (isResettingPassword) {
       if (!email) {
         setError('Please enter your email');
@@ -254,14 +260,6 @@ export default function AuthScreen() {
                 <Text style={styles.toggleText}>Back to Login</Text>
               </TouchableOpacity>
             )}
-            {!isResettingPassword && <View style={{width:'100%',gap:8,marginTop:16}}>
-              <Text style={{color:'#d4dce5',textAlign:'center',marginBottom:8}}>or continue with</Text>
-              {(['apple','google'] as const).map(provider => <TouchableOpacity key={provider} style={styles.createAccountButton} disabled={loading} onPress={async()=>{
-                setLoading(true); setError(null);
-                try { const {error}=await supabase.auth.signInWithOAuth({provider,options:{redirectTo:window.location.origin}}); if(error) throw error; }
-                catch(e:any){setError(e.message || 'Unable to connect. Please try signing in with email.');} finally{setLoading(false);}
-              }}><Text style={{color:'#fff',fontSize:13}}>Continue with {provider==='apple'?'Apple':'Google'}</Text></TouchableOpacity>)}
-            </View>}
             <SanctuaryBanner />
           </View>
         </View>
