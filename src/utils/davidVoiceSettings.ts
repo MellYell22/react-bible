@@ -21,8 +21,9 @@ export const DAVID_VOICE_SETTINGS = {
   // ~0.6 flattens him into a monotone reader.
   stability: 0.42,
   similarity_boost: 0.88,
-  // Marginally above neutral — reads as live, not rushed.
-  speed: 1.06,
+  // Below neutral on purpose: David is a calm companion, and at 1.0+ users
+  // heard him as rushed. ElevenLabs accepts 0.7-1.2; stay in 0.88-0.95.
+  speed: 0.9,
   // Style above ~0.3 exaggerates emphasis and adds clipped stops.
   style: 0.2,
   use_speaker_boost: true,
