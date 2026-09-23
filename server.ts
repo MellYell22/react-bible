@@ -1,5 +1,5 @@
 import { isMeaningfulTranscript } from './src/utils/voiceTranscript.mjs';
-import { DAVID_VOICE_SETTINGS, DAVID_DEFAULT_MODEL } from './src/utils/davidVoiceSettings.js';
+import { buildDavidSpeechBody, DAVID_TTS_MODEL, DAVID_TTS_VOICE, OPENAI_SPEECH_URL } from './src/utils/davidVoiceSettings.js';
 import { sanitizeForDavidSpeech } from './src/utils/davidSpeechDelivery.js';
 import dotenv from "dotenv";
 import path from "path";
@@ -26,10 +26,6 @@ import {
 } from './lib/reflectionUsage';
 import { DAVID_PERSONALITY_PROMPT, DAVID_CHAT_TEMPERATURE } from './src/constants/persona';
 import chatHandler from './api/chat.js';
-const ELEVENLABS_TTS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
-const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
-const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_22050_32';
-const DAVID_ELEVENLABS_VOICE_ID = 'KdyHP7aXTUxKmw1tVBvn';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -299,13 +295,9 @@ app.post("/api/stripe-webhook", async (req: any, res) => {
 app.get("/api/health", (req, res) => {
   const requiredEnvVars = [
     'OPENAI_API_KEY',
-    'ELEVENLABS_API_KEY',
-    'ELEVENLABS_VOICE_ID',
     'VITE_SUPABASE_URL',
     'VITE_SUPABASE_ANON_KEY',
     'APP_URL',
-    'ELEVENLABS_MODEL',
-    'ELEVENLABS_OUTPUT_FORMAT',
   ] as const;
 
   const configured = Object.fromEntries(
@@ -656,118 +648,74 @@ app.post("/api/speech", async (req, res) => {
   }
 
   // Same shared sanitizer api/speech.ts uses, so dev and production prepare
-  // David's words identically. It preserves ellipses and dashes as real spoken
-  // pauses rather than flattening them.
+  // David's words identically.
   const cleanText = sanitizeForDavidSpeech(text);
-
   if (!cleanText) {
     return res.status(400).json({ error: 'Text was empty after stripping markup' });
   }
 
-  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const apiKey = getOpenAIApiKey();
   if (!apiKey) {
-    console.warn('[Speech] ELEVENLABS_API_KEY is not configured; returning text-only voice fallback');
+    console.warn('[Speech] OPENAI_API_KEY is not configured; returning text-only voice fallback');
     return res.status(503).json({
       code: 'voice_not_configured',
       error: 'David voice audio is not configured yet.',
-      message: 'Add ELEVENLABS_API_KEY to the server environment to enable spoken audio.',
+      message: 'Add OPENAI_API_KEY to the server environment to enable spoken audio.',
     });
   }
 
-  // Pinned in code, same as api/speech.ts — see the note there.
-  const voiceId = DAVID_ELEVENLABS_VOICE_ID;
-
-  // Match user-selected sample C exactly; environment cannot select v3.
-  const MODEL_CANDIDATES = [DAVID_DEFAULT_MODEL];
-  const FAST_FORMAT = 'mp3_44100_128'; // higher quality audio = fuller, less robotic
-  // Stream directly from ElevenLabs so audio begins playing as chunks arrive.
-  const streamUrl = `${ELEVENLABS_TTS_URL}/${voiceId}/stream?output_format=${encodeURIComponent(FAST_FORMAT)}`;
-
-  const callElevenLabs = (model: string) =>
-    fetch(streamUrl, {
-      method: 'POST',
-      headers: {
-        'xi-api-key': apiKey,
-        'Content-Type': 'application/json',
-        'Accept': 'audio/mpeg',
-      },
-      body: JSON.stringify({
-        text: cleanText,
-        model_id: model,
-        voice_settings: DAVID_VOICE_SETTINGS,
-      }),
-    });
+  // Identical request to production (api/speech.ts) — built in one place.
+  const body = buildDavidSpeechBody(cleanText);
 
   try {
-    let response: Awaited<ReturnType<typeof fetch>> | null = null;
-    let usedModel = '';
-    let lastErrorBody = '';
-    let lastStatus = 502;
-
-    for (const model of MODEL_CANDIDATES) {
-      console.log('[API Request] ElevenLabs text-to-speech (streaming)', {
-        voiceId,
-        model,
-        outputFormat: FAST_FORMAT,
-        textLength: cleanText.length,
-        textPreview: previewLogText(cleanText),
-        voiceSettings: DAVID_VOICE_SETTINGS,
-      });
-
-      const attempt = await callElevenLabs(model);
-      if (attempt.ok) {
-        response = attempt;
-        usedModel = model;
-        break;
-      }
-
-      lastStatus = attempt.status;
-      lastErrorBody = await attempt.text();
-      console.error(`[Speech] ElevenLabs model "${model}" failed: HTTP ${attempt.status} — ${lastErrorBody.substring(0, 300)}`);
-      // Only fall through to the next candidate on model-availability style errors.
-      if (attempt.status !== 400 && attempt.status !== 404 && attempt.status !== 422) {
-        break;
-      }
-    }
-
-    if (!response || !response.ok || !response.body) {
-      console.error('[API Response] ElevenLabs text-to-speech', {
-        ok: false,
-        status: lastStatus,
-        bodyPreview: previewLogText(lastErrorBody, 500),
-      });
-      return res.status(lastStatus).json({
-        error: `ElevenLabs TTS failed (${lastStatus})`,
-        details: lastErrorBody,
-      });
-    }
-
-    console.log('[API Response] ElevenLabs text-to-speech (streaming)', {
-      ok: true,
-      status: response.status,
-      model: usedModel,
-      contentType: response.headers.get('content-type'),
+    console.log('[API Request] OpenAI text-to-speech (streaming)', {
+      model: DAVID_TTS_MODEL,
+      voice: DAVID_TTS_VOICE,
+      textLength: cleanText.length,
+      textPreview: previewLogText(cleanText),
     });
+
+    const response = await fetch(OPENAI_SPEECH_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok || !response.body) {
+      const errorText = await response.text().catch(() => '');
+      console.error('[API Response] OpenAI text-to-speech', {
+        ok: false,
+        status: response.status,
+        bodyPreview: previewLogText(errorText, 500),
+      });
+      return res.status(response.status || 502).json({
+        error: `David's voice failed (${response.status})`,
+        details: errorText.substring(0, 500),
+      });
+    }
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('X-David-Voice-Model', usedModel);
+    res.setHeader('X-David-Voice-Model', `${DAVID_TTS_MODEL}:${DAVID_TTS_VOICE}`);
 
-    // Pipe the ElevenLabs byte stream straight to the client as it arrives.
     const nodeStream = Readable.fromWeb(response.body as any);
     nodeStream.on('error', (err) => {
       console.error('[Speech] Stream piping error:', err?.message || err);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'ElevenLabs stream failed' });
+        res.status(500).json({ error: 'Voice stream failed' });
       } else {
         res.end();
       }
     });
     nodeStream.pipe(res);
   } catch (error: any) {
-    console.error('[Speech] ElevenLabs request failed:', error?.message || error);
+    console.error('[Speech] OpenAI speech request failed:', error?.message || error);
     if (!res.headersSent) {
-      res.status(500).json({ error: error?.message || 'ElevenLabs speech generation failed' });
+      res.status(500).json({ error: error?.message || 'Speech generation failed' });
     } else {
       res.end();
     }
@@ -838,8 +786,7 @@ async function startServer() {
       console.log(`💳 Stripe: ${getStripe() ? "✅ Configured" : "❌ Missing STRIPE_SECRET_KEY"}`);
       console.log(`🗄️ Supabase: ${supabase ? "✅ Configured" : "❌ Missing SUPABASE_URL/SERVICE_ROLE_KEY"}`);
       console.log(`🤖 OpenAI: ${process.env.OPENAI_API_KEY ? "✅ Configured" : "❌ Missing OPENAI_API_KEY"}`);
-      console.log(`🎙️ ElevenLabs TTS: ${process.env.ELEVENLABS_API_KEY ? "✅ Configured" : "❌ Missing ELEVENLABS_API_KEY"}`);
-      console.log(`🗣️ David Voice: ${DAVID_ELEVENLABS_VOICE_ID} (ElevenLabs)`);
+      console.log(`🗣️ David Voice: OpenAI ${DAVID_TTS_MODEL} / ${DAVID_TTS_VOICE}`);
       console.log("--------------------------\n");
     });
   }

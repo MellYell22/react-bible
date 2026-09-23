@@ -5,48 +5,43 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * David's voice ID was changed in code, the deploy went green, and production
- * kept speaking in the old stock voice for days. Nothing errored — a stale
- * ELEVENLABS_VOICE_ID in the hosting dashboard silently outranked the code.
- *
- * These tests keep the code authoritative so that failure cannot repeat.
+ * David speaks through OpenAI text-to-speech (gpt-4o-mini-tts, "cedar").
+ * The voice is pinned in ONE file and both speech paths build their request
+ * from it, so production and local preview can never drift apart, and no
+ * environment variable can silently swap his voice.
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (...p) => fs.readFileSync(path.join(__dirname, "..", ...p), "utf8");
 
+const settings = read("src", "utils", "davidVoiceSettings.ts");
 const speech = read("api", "speech.ts");
 const server = read("server.ts");
-const VOICE_ID = "KdyHP7aXTUxKmw1tVBvn";
 
-test("both speech paths declare the same voice ID", () => {
-  assert.ok(speech.includes(`const DAVID_ELEVENLABS_VOICE_ID = '${VOICE_ID}'`));
-  assert.ok(server.includes(`const DAVID_ELEVENLABS_VOICE_ID = '${VOICE_ID}'`));
+test("David's voice is OpenAI cedar on gpt-4o-mini-tts", () => {
+  assert.match(settings, /DAVID_TTS_MODEL = 'gpt-4o-mini-tts'/);
+  assert.match(settings, /DAVID_TTS_VOICE = 'cedar'/);
+  assert.match(settings, /api\.openai\.com\/v1\/audio\/speech/);
 });
 
-test("the environment can no longer override David's voice", () => {
+test("David speaks at a calm pace", () => {
+  const speed = Number(settings.match(/DAVID_TTS_SPEED = ([0-9.]+)/)?.[1]);
+  assert.ok(speed >= 0.85 && speed < 1, `speed ${speed} should be calm, below 1.0`);
+});
+
+test("both speech paths build the identical request from the shared settings", () => {
   for (const [name, src] of [["api/speech.ts", speech], ["server.ts", server]]) {
-    assert.ok(
-      !/voiceId\s*=\s*process\.env\.ELEVENLABS_VOICE_ID\s*\|\|/.test(src),
-      `${name} still lets ELEVENLABS_VOICE_ID win over the code`,
-    );
-    assert.ok(
-      /const voiceId = DAVID_ELEVENLABS_VOICE_ID;/.test(src),
-      `${name} should read the voice straight from the pinned constant`,
-    );
+    assert.match(src, /buildDavidSpeechBody\(cleanText\)/, `${name} must use the shared request builder`);
+    assert.match(src, /OPENAI_SPEECH_URL/, `${name} must call OpenAI speech`);
   }
 });
 
-test("a disagreeing env var warns loudly instead of taking effect", () => {
-  assert.match(speech, /Ignoring ELEVENLABS_VOICE_ID/);
-  assert.match(speech, /pinned in code/);
+test("ElevenLabs is fully removed from the speech paths", () => {
+  for (const [name, src] of [["api/speech.ts", speech], ["server.ts", server], ["davidVoiceSettings.ts", settings.replace(/ElevenLabs has been removed entirely\./, "")]]) {
+    assert.ok(!/elevenlabs\.io|xi-api-key|ELEVENLABS_API_KEY/i.test(src), `${name} still references ElevenLabs`);
+  }
 });
 
-test("no other voice ID is left anywhere in the speech paths", () => {
-  // Any 20-char ElevenLabs-shaped token that is not the approved one.
-  for (const [name, src] of [["api/speech.ts", speech], ["server.ts", server]]) {
-    const candidates = (src.match(/'[A-Za-z0-9]{20}'/g) || [])
-      .map((s) => s.replace(/'/g, ""))
-      .filter((id) => id !== VOICE_ID);
-    assert.deepEqual(candidates, [], `${name} contains a stray voice-like ID: ${candidates}`);
-  }
+test("no environment variable can override the voice", () => {
+  assert.ok(!/process\.env\.[A-Z_]*VOICE/.test(speech));
+  assert.ok(!/process\.env\.[A-Z_]*VOICE/.test(server));
 });

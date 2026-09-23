@@ -223,7 +223,7 @@ export function sanitizeForDavidSpeech(text: string): string {
 
   let t = preparePlainSpeechText(text);
 
-  // Ellipses make ElevenLabs insert long breathing pauses; keep the beat short.
+  // Ellipses make text-to-speech insert long breathing pauses; keep the beat short.
   t = t.replace(/\s*\.{3}\s*/g, ', ');
   t = t.replace(/,\s*,+/g, ',');
 

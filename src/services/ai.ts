@@ -918,7 +918,7 @@ export const generateSpeech = async (
     }
 
     if (response.status === 401 || details.toLowerCase().includes('invalid_api_key')) {
-      throw new Error('ElevenLabs rejected the current API key. David can respond in text, but voice audio cannot be generated yet.');
+      throw new Error('OpenAI rejected the current API key. David can respond in text, but voice audio cannot be generated yet.');
     }
 
     throw new Error(error.error || `David's voice audio could not be generated (${response.status}).`);

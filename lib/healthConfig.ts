@@ -8,8 +8,6 @@ const isValidPriceId = (value: string | undefined) => Boolean(value?.trim().star
 export const getLaunchHealth = (env: Environment) => {
   const core = {
     OPENAI_API_KEY: isConfigured(env.OPENAI_API_KEY),
-    ELEVENLABS_API_KEY: isConfigured(env.ELEVENLABS_API_KEY),
-    ELEVENLABS_VOICE_ID: isConfigured(env.ELEVENLABS_VOICE_ID),
     VITE_SUPABASE_URL: isConfigured(env.VITE_SUPABASE_URL || env.SUPABASE_URL),
     VITE_SUPABASE_ANON_KEY: isConfigured(env.VITE_SUPABASE_ANON_KEY),
     APP_URL: isConfigured(env.APP_URL),
@@ -26,10 +24,7 @@ export const getLaunchHealth = (env: Environment) => {
     STRIPE_PRICE_ID_PLUS: isValidPriceId(env.STRIPE_PRICE_ID_PLUS),
   };
 
-  const optional = {
-    ELEVENLABS_MODEL: isConfigured(env.ELEVENLABS_MODEL),
-    ELEVENLABS_OUTPUT_FORMAT: isConfigured(env.ELEVENLABS_OUTPUT_FORMAT),
-  };
+  const optional = {};
 
   const coreReady = Object.values(core).every(Boolean);
   const billingReady = Object.values(billing).every(Boolean);
