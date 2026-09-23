@@ -23,7 +23,7 @@ const PLAN_COPY = [
   {
     id: 'pro' as const,
     name: 'PRO',
-    price: '$19.99',
+    price: '$12.99',
     suffix: '/month',
     features: ['Everything in Plus', '1 hour of voice chat per month', 'Deeper, personalized reflections', 'Priority support'],
   },

@@ -32,7 +32,7 @@ export const PLANS = {
   PRO: {
     id: 'pro',
     name: "David's Voice Pro",
-    price: '$19.99',
+    price: '$12.99',
     interval: 'month',
     // No dead fallback: unset env means Pro checkout is unavailable, by design.
     priceId: import.meta.env.VITE_STRIPE_PRICE_ID_PRO || null,
