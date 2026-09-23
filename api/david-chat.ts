@@ -272,7 +272,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const rawReply = completion.choices[0]?.message?.content?.trim() || '';
-    const reply = cleanReply(rawReply) || 'Mm. I’m here — say that again for me?';
+    const reply = cleanReply(rawReply) || 'Sorry, I lost you for a second. Say that again?';
 
     // Persist the turn WITH its metadata. These columns already existed but
     // nothing filled them, which is why David kept reusing the same openings
