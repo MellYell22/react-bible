@@ -961,6 +961,13 @@ export default function VoiceScreen() {
       lastGreeting,
     });
 
+    // David's greeting MUST be part of the conversation history. Without it,
+    // the server sees the user's first reply as the very first turn (no
+    // assistant message yet), applies the "greet them back" opening rules, and
+    // David repeats his hello instead of answering. Committing it here also
+    // turns on the server's "do not restart the conversation" rule.
+    commitMessages([{ role: 'assistant', content: greeting }]);
+
     await playDavidResponseAudio(greeting, {
       conversationId: nextConversationId,
       isGreeting: true,
