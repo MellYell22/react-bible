@@ -996,6 +996,10 @@ export default function VoiceScreen() {
     stopCurrentAudio();
     stopVoiceActivity();
     setTextInput('');
+    // The conversation is over: nothing from it lingers on screen or in
+    // memory, so the next Start Conversation begins clean.
+    commitMessages([]);
+    setLastResponseText('');
     setPhase('ended');
   };
 

@@ -14,6 +14,8 @@ import {
 import { checkChatAccess } from '../lib/chatAccess.js';
 import { detectConversationOpening } from '../src/utils/conversationOpening.mjs';
 import { buildOpeningRules } from '../src/utils/davidOpeningRules.mjs';
+import { detectDavidFlowStage, shapeDavidReply } from '../src/utils/davidConversationFlow.mjs';
+import { extractVerseReferences } from '../src/utils/davidContinuity.mjs';
 
 const DAVID_CHAT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const DAVID_CHAT_TEMPERATURE = 0.8;
@@ -33,51 +35,51 @@ const previewLogText = (value: string, maxLength = 180): string => (
 
 /**
  * Live voice intentionally uses a compact system prompt instead of the large
- * all-purpose persona prompt used by typed chat. The old prompt was thousands
- * of tokens long and also contained many example reactions, which made short
- * voice turns slower and more likely to sound canned. Keep the rules here
- * small, explicit, and optimized for spoken conversation.
+ * all-purpose persona prompt used by typed chat. Short prompts keep voice
+ * turns fast, and fewer worked examples means less for the model to parrot.
+ * The rules here describe who David is; the stage-specific block appended
+ * later (davidOpeningRules.mjs) says what this particular turn needs.
  */
 const DAVID_LIVE_VOICE_CORE = `
-You are David, a warm, grounded friend who knows the Bible deeply, talking out loud with someone in a live voice conversation. They should feel heard, a little lighter, and forget they're talking to software. You are not a chatbot, pastor, therapist, announcer, or customer support.
+You are David, talking out loud with someone in a live voice conversation. You're a real, grounded friend who knows the Bible well. Not a chatbot, not a therapist, not a pastor giving a sermon, not customer service, not a motivational speaker. The person should forget within two replies that they're talking to software.
 
-PERSONALITY:
-- Warm, calm, steady. A friend across the table with a cup of coffee.
-- A little human: you have opinions and share them kindly, you can say "I don't know," and you can be lightly funny when the moment allows.
-- Compassionate, never preachy or performative. Match their energy: gentle when they're hurting, plainly happy with good news, playful when they joke.
+WHO YOU ARE:
+- Warm, calm, direct, and emotionally intelligent. You notice the specific thing they said and respond to that.
+- Honest. You can have an opinion, say "I don't know," or be lightly funny when the moment allows. Never funny when they're hurting.
+- Steady. You don't gush, perform, or panic. Not every moment needs to be spiritual.
+- You love Scripture the way someone loves a book that changed their life. You bring it up when it genuinely connects, never to fill space.
 
-HOW YOU SOUND:
-- Relaxed, lower, unhurried. Calm and moderate pace, slower on heavy moments. Never rushed.
-- Usually one or two sentences. One is often perfect. Vary the rhythm: a short line, then a fuller thought.
-- Contractions and everyday spoken English. An occasional comma, ellipsis, or dash where a real pause or turn would happen.
-- Start with real words. No filler sounds (Mm, Mhmm, Hmm, Um, Uh, Ah).
-- At most ONE question per reply, and plenty of replies end with no question at all.
-- No headings, bullets, lists, stage directions, or bracketed actions.
+HOW YOU TALK:
+- Short. Usually one to three short sentences. One sentence is often perfect. No rambling, no over-explaining.
+- Everyday spoken English with contractions. Normal punctuation so the words can be spoken naturally. No excessive ellipses, no stage directions, no written sighs, and never a filler sound to open (Mm, Mhm, Hmm, Um, Uh, Ah).
+- Don't repeat their words back to them. Don't tell them what they're feeling. Don't stack reassurance ("I hear you, that's valid, that must be hard").
+- Never more than one question in a reply, and plenty of replies end with no question at all. A friend who asks a question every turn is conducting an interview.
+- Match their energy. Casual gets casual. Upset gets steady and compassionate in plain words, never rehearsed. Good news gets plainly happy.
+- Vary your shape. Never start two replies the same way or end them the same way.
 
-VARIETY:
-- Never greet the same way twice, and don't start every reply with "Hey" or "Yeah."
-- Never reuse an opening, reaction, or closing question you already used.
-- Whatever they just said is the new center. Respond to that and move forward. Never recap or paraphrase their words back as an analysis.
+GREETINGS:
+- A greeting is one short line and nothing after it: "Hey." "Hey, how are you?" "Hi." "Good morning." No speech, no line about yourself, no line about them.
+- Never use scripted lines like "What's happening in your world?", "Hey friend, how's life?", "What's on the agenda today?", "Look who it is.", "Catch me up.", or "How's life treating you?"
+- Greet once per conversation. Never greet again mid-conversation.
 
-LISTENING:
-- For a short feeling ("I'm sad", "I'm tired", "bad day"), don't analyze it or invent a deeper emotion. Ask one simple, natural question and let them talk. "Sad" does not mean lonely. "Tired" does not mean overwhelmed.
-- Never add a feeling or life detail they didn't give you. Never invent memories. Never claim God told you something about them.
+SCRIPTURE — a friend first, a Bible companion second:
+- Greetings, small talk, jokes, and good news get warmth, not a verse.
+- When they name a feeling without saying what's behind it, be a friend: react briefly and ask ONE simple question ("What's going on?"). No verse yet.
+- Once they've told you what actually happened, respond to that real situation first, then bring in ONE fitting verse or one person from Scripture who lived something like it, and say in one plain sentence why it fits what they told you. Then keep talking like a person.
+- One verse, never several. Never reuse a verse you've already given them. Never invent or misquote Scripture; if you're unsure of the wording, describe the idea and name the passage instead.
+- Don't keep asking questions after they've explained. Move forward.
 
-SCRIPTURE:
-- A friend who knows Scripture, not an intake form. Greetings, small talk, jokes, and good news get warmth, not a verse.
-- When there's enough context, bring ONE verse or one person from Scripture who lived something similar, mentioned like a friend mentions a song they love, plus one plain sentence on why it fits. Never stack verses, never misquote, never turn it into a devotional unless they ask.
+KEEP MOVING FORWARD:
+- Whatever they just said is the new center. Remember what they've already told you and never make them repeat it. Never recap the conversation, restart it, or repeat encouragement you already gave.
 
 NEVER SAY:
-"I hear you", "I can hear you", "I'm here with you", "I'm here for you", "It sounds like you're feeling", "Thank you for sharing that", "That must be difficult", "Everything happens for a reason", "Stay strong", "You've got this", "What's on your heart?", "Great question!", or anything about being an AI, model, or program.
+"I hear you", "I'm here for you", "I'm here to listen", "It sounds like you're feeling", "Thank you for sharing that", "That must be difficult", "Everything happens for a reason", "Stay strong", "You've got this", "You are not alone", "What's on your heart?", "What brings you here today?", "Great question!", or anything about being an AI, model, or program.
 
-SHORT-TURN FEEL (style only, never copy the words):
-User: "I'm sad." -> "What happened?"
-User: "I'm tired." -> "Long day, or long week?"
-User: "Hey David." -> "Oh hey. How's it going?"
-User: "Thanks." -> "Anytime."
+NOTHING INVENTED:
+You know only what they have actually told you. Never state, imply, or guess anything else about their life. Never invent a shared memory. Vagueness means ask one question, never guess.
 
 SAFETY:
-If the user mentions self-harm, harming someone else, abuse, immediate danger, or a medical emergency, drop the casual style and be warm, clear, and direct about getting immediate real-world help from emergency services, a crisis service, or a trusted person nearby. Do not replace urgent help with a Bible verse.
+If they mention self-harm, harming someone else, abuse, immediate danger, or a medical emergency, drop the casual style. Be warm, clear, and direct about getting real help right now from emergency services, a crisis line, or a trusted person nearby, in addition to talking with you. Never answer that with a routine verse.
 `;
 
 type ChatLikeMessage = {
@@ -116,8 +118,6 @@ const sanitizeMessages = (messages: ChatLikeMessage[]): SanitizedChatMessage[] =
 const getLatestUserText = (messages: ChatLikeMessage[]): string => {
   return [...messages].reverse().find((message) => message.role === 'user')?.content?.trim() || '';
 };
-
-const getWordCount = (value: string): number => value.trim().split(/\s+/).filter(Boolean).length;
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -175,11 +175,16 @@ export default async function handler(req: any, res: any) {
       messages: sanitizedMessages,
     });
   const usedVerseRefs = normalizeUsedVerses(usedVerses);
+  // Where this conversation is: a friend first, Scripture once David actually
+  // knows what the person is dealing with, then plain conversation after.
+  const flowStage = opening ? 'general' : detectDavidFlowStage(sanitizedMessages);
+  const scriptureAllowedThisTurn = flowStage === 'ready-for-scripture' || flowStage === 'general';
   const scriptureGuidance = buildDavidScriptureGuidance(resolvedMoodKey, usedVerseRefs);
-  const shortLowInformationTurn = Boolean(liveVoice)
-    && getWordCount(latestUserText) <= 8
-    && !/[?]/.test(latestUserText)
-    && Boolean(resolvedMoodKey);
+  // A verse option only exists on turns where a verse is allowed, so the
+  // model is never handed one it is being told not to use.
+  const turnGuidance = scriptureAllowedThisTurn
+    ? scriptureGuidance
+    : { ...scriptureGuidance, scripture: null, reaction: null, followUp: null, resetUsedVerses: false };
 
   try {
     const openaiApiKey = getOpenAIApiKey();
@@ -194,9 +199,9 @@ export default async function handler(req: any, res: any) {
     // Typed chat keeps the full persona. Live voice gets the compact persona
     // above so time-to-first-token stays low and short replies stop inheriting
     // canned mood-example language.
-    const typedBaseSystemPrompt = buildDavidSystemPromptFromGuidance(scriptureGuidance, { includeVerseFooter: !stream });
-    const voiceScriptureOption = !shortLowInformationTurn && scriptureGuidance.scripture
-      ? `\n\nOPTIONAL SCRIPTURE IF THE MOMENT HAS ENOUGH CONTEXT:\n${scriptureGuidance.scripture.reference}: ${scriptureGuidance.scripture.verse}\nUse it only if it naturally answers what the user actually said. Do not use it merely because a mood was detected.`
+    const typedBaseSystemPrompt = buildDavidSystemPromptFromGuidance(turnGuidance, { includeVerseFooter: !stream });
+    const voiceScriptureOption = turnGuidance.scripture
+      ? `\n\nONE SCRIPTURE OPTION FOR THIS TURN, IF IT FITS WHAT THEY SAID:\n${turnGuidance.scripture.reference}: ${turnGuidance.scripture.verse}\nUse it only if it genuinely meets what the person actually told you. Otherwise choose a passage that fits better, or none.`
       : '';
     const baseSystemPrompt = liveVoice
       ? `${DAVID_LIVE_VOICE_CORE}${voiceScriptureOption}`
@@ -213,12 +218,12 @@ export default async function handler(req: any, res: any) {
     const antiRepeatRule = recentAssistantOpenings.length
       ? `\n - Never reuse or lightly rephrase these openings you already used: ${recentAssistantOpenings.map((opening) => `"${opening.replace(/"/g, '')}"`).join(', ')}. Start this reply a genuinely different way.`
       : '';
-    const openingRulesBody = buildOpeningRules(opening);
+    const openingRulesBody = buildOpeningRules(opening, { stage: flowStage });
     const openingRules = openingRulesBody ? `\n\n${openingRulesBody}` : '';
 
     const sharedRules = `\n - Answer only the latest user words: "${latestUserText.replace(/"/g, '\\"').slice(0, 500)}"\n - Recent context can help tone and continuity, but it must not override the user's latest message. Continue naturally from what the user just said.${hasSpokenBefore ? ' Do not restart the conversation or open with another greeting.' : ''}\n - Never infer a stronger or different emotion than the user stated. If they say "sad", do not turn that into lonely, isolated, exhausted, abandoned, or overwhelmed. Ask instead.\n - Do not paraphrase the user's emotion back as an analysis. For a short disclosure, react briefly and ask one natural question.\n - Do not use bullets, numbering, headings, or formal transitions.\n - Never mention, recommend, or offer videos, YouTube, reels, clips, or other external media unless the user explicitly asks for a video or external media.\n - Do not open with stock phrases like "I hear you", "I can hear you", "I'm here with you", "That's heavy", "Sadness is real", "It sounds like you're feeling", or any opening you used earlier in this conversation. Vary your wording every turn.${antiRepeatRule}\n - End with one gentle question only when it truly helps, and never the same question twice. Otherwise stop naturally with no question.`;
     const modeRules = liveVoice
-      ? `\n\nLIVE VOICE RULES:${sharedRules}\n - Never begin with a filler sound: no Mm, Mmm, Mhmm, Hmm, Hm, Um, Uh, Ah, or similar vocalization. Start with actual words.\n - For a very short message, target roughly 3 to 12 spoken words. For a normal turn, use 1 to 2 natural sentences, usually under 30 words.\n - The one exception is the reply where you bring Scripture in (THE TURN): there you may take up to about 55 words, so the verse and one plain sentence of why it fits both land. Never longer, and never for any other kind of reply.\n - Do not slow the reply down with a sermon, emotional summary, or unnecessary reassurance. One natural reaction or question is enough.\n - Speak smoothly and conversationally. No exaggerated pauses or stage directions.`
+      ? `\n\nLIVE VOICE RULES:${sharedRules}\n - Never begin with a filler sound: no Mm, Mmm, Mhmm, Hmm, Hm, Um, Uh, Ah, or similar vocalization. Start with actual words.\n - For a very short message, target roughly 3 to 12 spoken words. For a normal turn, one or two natural sentences, usually under 30 words.\n - The one exception is the turn where you bring Scripture in: there you may take up to about 55 words, so the verse and one plain sentence of why it fits both land. Never longer, and never for any other kind of reply.\n - No sermon, no emotional summary, no unnecessary reassurance. One natural reaction or one question is enough.\n - Speak smoothly and conversationally, with normal punctuation. No exaggerated pauses, no strings of ellipses, no stage directions.`
       : `\n\nTEXT CHAT RULES:${sharedRules}\n - This is typed chat, so you have a little more room than live voice: usually 2 to 4 short sentences.\n - No filler sounds in this typed reply — no mm, mhmm, um, uh, hmm, hm, ah, oh. Those belong to spoken voice only; written text is read, not heard, so they look awkward on screen. Start with real words instead.\n - First meet the feeling in your own words. Share a verse only when it genuinely fits — never for greetings or small talk, and never more than one verse.\n - When you share a verse, explain in one or two plain sentences why it meets what they're feeling, like a friend would — not like a commentary.`;
     const systemPrompt = `${baseSystemPrompt}${recentVoiceContext}${modeRules}${openingRules}`;
     const maxTokens = liveVoice ? DAVID_VOICE_MAX_TOKENS : DAVID_TEXT_MAX_TOKENS;
@@ -226,7 +231,7 @@ export default async function handler(req: any, res: any) {
     // prompt size materially. Typed chat keeps the existing wider window.
     const modelMessages = liveVoice ? sanitizedMessages.slice(-8) : sanitizedMessages;
 
-    console.log(`[Chat API] Mood context: ${scriptureGuidance.moodKey || resolvedMoodKey || 'none'}, verse=${scriptureGuidance.scripture?.reference || 'none'}`);
+    console.log(`[Chat API] Mood context: ${scriptureGuidance.moodKey || resolvedMoodKey || 'none'}, stage=${flowStage}, verse=${turnGuidance.scripture?.reference || 'none'}`);
     console.log('[Chat API] Exact latest user text:', previewLogText(latestUserText, 300));
 
     const systemMessage = { role: 'system' as const, content: systemPrompt };
@@ -237,11 +242,12 @@ export default async function handler(req: any, res: any) {
       latestUserPreview: previewLogText(latestUserText),
       moodKey: scriptureGuidance.moodKey || resolvedMoodKey || null,
       opening: opening || null,
-      verse: scriptureGuidance.scripture?.reference || null,
+      verse: turnGuidance.scripture?.reference || null,
       usedVerseCount: usedVerseRefs.length,
       voiceContextLength: typeof voiceContext === 'string' ? voiceContext.length : 0,
       systemPromptLength: systemPrompt.length,
-      shortLowInformationTurn,
+      flowStage,
+      scriptureAllowedThisTurn,
       temperature: DAVID_CHAT_TEMPERATURE,
       presencePenalty: DAVID_CHAT_PRESENCE_PENALTY,
       frequencyPenalty: DAVID_CHAT_FREQUENCY_PENALTY,
@@ -289,7 +295,11 @@ export default async function handler(req: any, res: any) {
         frequency_penalty: DAVID_CHAT_FREQUENCY_PENALTY,
         max_tokens: maxTokens,
       });
-      const text = completion.choices[0].message.content || '';
+      const rawText = completion.choices[0].message.content || '';
+      // Hard guarantees the prompt alone cannot give: no markdown or stage
+      // directions, never more than one question, never a ramble.
+      const verseActuallyUsed = /\[VERSE USED:\s*([^\]]+)\]/i.test(rawText);
+      const text = shapeDavidReply(stripVerseFooter(rawText), { maxSentences: liveVoice ? 4 : 6 });
 
       if (!text.trim()) {
         return res.status(502).json({
@@ -303,17 +313,21 @@ export default async function handler(req: any, res: any) {
         id: completion.id,
         model: completion.model,
         finishReason: completion.choices[0]?.finish_reason || null,
+        rawLength: rawText.length,
         textLength: text.length,
         textPreview: previewLogText(text),
       });
 
-      const verseActuallyUsed = /\[VERSE USED:\s*([^\]]+)\]/i.test(text);
+      // Live voice gets no private footer, so the verse David actually spoke
+      // is read from his own words. That is what keeps him from reusing it.
+      const spokenVerse = extractVerseReferences(text)[0] || null;
+      const verseUsed = verseActuallyUsed ? turnGuidance.scripture?.reference || spokenVerse : spokenVerse;
 
       res.status(200).json({
-        text: stripVerseFooter(text),
+        text,
         moodKey: scriptureGuidance.moodKey || resolvedMoodKey,
-        verseUsed: verseActuallyUsed ? scriptureGuidance.scripture?.reference || null : null,
-        resetUsedVerses: verseActuallyUsed && scriptureGuidance.resetUsedVerses,
+        verseUsed,
+        resetUsedVerses: Boolean(verseUsed) && verseActuallyUsed && turnGuidance.resetUsedVerses,
       });
     }
   } catch (error: any) {

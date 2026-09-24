@@ -150,11 +150,7 @@ export default function ChatScreen({ navigation, route }: any) {
       }
       if (cancelled) return;
       const greetingContext = { firstName, isReturning, daysSinceLastChat, lastGreeting: readLastGreeting() };
-      let greeting = getDavidGreeting(greetingContext);
-      for (let attempt = 0; attempt < 8 && /good to see you/i.test(greeting); attempt += 1) {
-        greeting = getDavidGreeting({ ...greetingContext, lastGreeting: greeting });
-      }
-      if (/good to see you/i.test(greeting)) greeting = isReturning ? "Hey, how's today been?" : "Hey, I'm David... how are you doing?";
+      const greeting = getDavidGreeting(greetingContext);
       writeLastGreeting(greeting);
       setMessages([{ role: 'assistant', content: greeting }]);
     };

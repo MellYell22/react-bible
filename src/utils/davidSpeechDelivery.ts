@@ -20,8 +20,32 @@ const STAGE_DIRECTION_RE = new RegExp(
   "gi",
 );
 
-// "Mm." / "Mhmm..." / "Um..." at the very start sounds like a stall, not warmth.
-const LEADING_FILLER_RE = /^(?:(?:m+|mm+-?hm+|mhm+|hmm+|hm+|um+|uh+)(?:\.{1,3}|[,!\u2026])?\s+)+/i;
+// "Mm." / "Mhmm..." / "Um..." / "Sigh." at the very start sounds like a stall
+// or a fake sigh read aloud, not warmth.
+const LEADING_FILLER_RE = /^(?:(?:m+|mm+-?hm+|mhm+|hmm+|hm+|um+|uh+|sigh|sighs|ugh|oof|whew|phew)(?:\.{1,3}|[,!\u2026])?\s+)+/i;
+
+// A written vocalization dropped into the middle of a reply ("that's rough, mm, I get it").
+const INLINE_FILLER_RE = /(?<=[,.!?]\s)(?:mm+|mhm+|hmm+|hm+|um+|uh+|sigh|sighs)(?:\.{1,3}|[,!\u2026])?\s+/gi;
+
+/**
+ * One reflective pause per reply is plenty. Every ellipsis after the first
+ * becomes a comma (mid-thought) or a period (new sentence) so the voice does
+ * not drift into a string of dramatic pauses. Quoted Scripture is never touched.
+ */
+const capEllipsesOutsideQuotes = (text: string): string =>
+  text
+    .split(/("[^"]*")/)
+    .map((part) => {
+      if (part.startsWith('"')) return part;
+      let seen = 0;
+      return part.replace(/\s*\.\.\.\s*(?=(\S)|$)/g, (match, nextChar: string | undefined) => {
+        seen += 1;
+        if (seen === 1) return match;
+        if (!nextChar) return '.';
+        return /[A-Z]/.test(nextChar) ? '. ' : ', ';
+      });
+    })
+    .join('');
 
 const joinLineBreaksConversationally = (text: string): string => {
   const lines = text
@@ -55,6 +79,9 @@ function preparePlainSpeechText(text: string): string {
   t = t.trim();
 
   t = t.replace(LEADING_FILLER_RE, '');
+  t = t.replace(INLINE_FILLER_RE, '');
+  t = capEllipsesOutsideQuotes(t);
+  t = t.replace(/\s+([,.!?;:])/g, '$1').replace(/\s+/g, ' ');
 
   return t.trim();
 }

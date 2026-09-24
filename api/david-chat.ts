@@ -4,6 +4,7 @@ import { DAVID_PERSONA, DAVID_NO_FABRICATION_RULE } from '../src/constants/perso
 import { DAVID_SELF_INTRODUCTION_RULE, normalizeDavidSelfIntroduction } from '../src/utils/davidIdentity.js';
 import { detectConversationOpening } from '../src/utils/conversationOpening.mjs';
 import { buildOpeningRules } from '../src/utils/davidOpeningRules.mjs';
+import { detectDavidFlowStage, shapeDavidReply } from '../src/utils/davidConversationFlow.mjs';
 import {
   buildContinuityBriefing,
   summarizeTurn,
@@ -20,19 +21,22 @@ const FREE_DAILY_LIMIT = 5;
  */
 const MEMORY_WINDOW = 24;
 const VERBATIM_TURNS = 8;
+/** Turns newer than this belong to the conversation the person is in right now. */
+const CURRENT_SITTING_MS = 45 * 60 * 1000;
 
 const VOICE_ADDENDUM = `
 
-VOICE MODE: This response will be spoken aloud. Keep it especially short, smooth, and natural. One or two complete spoken sentences, unhurried.`;
+VOICE MODE: This response will be spoken aloud. Keep it especially short, smooth, and natural. One or two complete spoken sentences with normal punctuation, no filler sounds, no stage directions, no strings of ellipses.`;
 
 const buildSystemPrompt = (options: {
   continuity: string;
   mode: 'chat' | 'voice';
   opening: 'greeting' | 'small-talk' | 'low-signal' | null;
+  stage: 'feeling-only' | 'ready-for-scripture' | 'after-scripture' | 'general';
   latestUserText: string;
   isReturning: boolean;
 }): string => {
-  const { continuity, mode, opening, latestUserText, isReturning } = options;
+  const { continuity, mode, opening, stage, latestUserText, isReturning } = options;
 
   const turnRules = `
 THIS TURN:
@@ -47,7 +51,10 @@ THIS TURN:
     DAVID_SELF_INTRODUCTION_RULE,
     continuity,
     turnRules,
-    opening ? buildOpeningRules(opening) : '',
+    // Opening turns get the light-touch rules; every other turn gets the
+    // rules for where this conversation actually is (friend first, then one
+    // verse once David knows what happened, then plain conversation).
+    buildOpeningRules(opening, { stage }),
     mode === 'voice' ? VOICE_ADDENDUM : '',
     // Last position on purpose: this is the rule that must survive everything
     // above it, and recency is the cheapest way to buy that.
@@ -57,26 +64,14 @@ THIS TURN:
     .join('\n\n');
 };
 
+/**
+ * Same shape guarantee every David surface gets: plain sentences, at most one
+ * question, no ramble. Then the identity normalizer so he only ever calls
+ * himself David.
+ */
 const cleanReply = (text: string): string => {
-  let value = text
-    .replace(/\[[^\]]*\]/g, '')
-    .replace(/[*_#`]+/g, '')
-    .replace(/\r?\n+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
+  const value = shapeDavidReply(text, { maxSentences: 4 });
   if (!value) return '';
-
-  const sentences = value.match(/[^.!?]+[.!?]+['"’”)]*|[^.!?]+$/g) ?? [value];
-  const kept: string[] = [];
-  for (const raw of sentences) {
-    const sentence = raw.trim();
-    if (!sentence) continue;
-    kept.push(sentence);
-    if (/\?['"’”)]*$/.test(sentence) || kept.length >= 4) break;
-  }
-
-  value = kept.join(' ').trim();
   return normalizeDavidSelfIntroduction(value);
 };
 
@@ -214,10 +209,26 @@ export default async function handler(req: any, res: any) {
     const opening = detectConversationOpening(message, priorUserTexts);
 
     const continuity = buildContinuityBriefing(rows, { now: new Date(), firstName });
+
+    // Only turns from this sitting decide the Scripture stage. A verse David
+    // gave last week must not stop him from meeting a fresh situation today.
+    const sittingCutoff = Date.now() - CURRENT_SITTING_MS;
+    const sittingRows = rows.filter((row: any) => {
+      const at = new Date(row?.created_at || 0).getTime();
+      return Number.isFinite(at) && at >= sittingCutoff;
+    });
+    const stage = opening
+      ? 'general'
+      : detectDavidFlowStage([
+        ...(toRecentTranscript(sittingRows, VERBATIM_TURNS) as Array<{ role: 'user' | 'assistant'; content: string }>),
+        { role: 'user', content: message },
+      ]);
+
     const systemPrompt = buildSystemPrompt({
       continuity,
       mode,
       opening,
+      stage,
       latestUserText: message,
       isReturning,
     });
@@ -234,6 +245,7 @@ export default async function handler(req: any, res: any) {
     console.log('[David Chat] Turn context:', {
       mode,
       opening: opening || null,
+      stage,
       historyRows: rows.length,
       isReturning,
       hasFirstName: Boolean(firstName),

@@ -41,6 +41,42 @@ test("ElevenLabs is fully removed from the speech paths", () => {
   }
 });
 
+/** Every file that can execute in the web app or its API. */
+const walk = (dir) => {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walk(full));
+    else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name)) out.push(full);
+  }
+  return out;
+};
+
+test("no other voice vendor can run anywhere in David's runtime", () => {
+  const root = path.join(__dirname, "..");
+  const files = [
+    ...walk(path.join(root, "src")),
+    ...walk(path.join(root, "api")),
+    ...walk(path.join(root, "lib")),
+    path.join(root, "server.ts"),
+  ];
+  const vendorReference = /elevenlabs\.io|api\.elevenlabs|xi-api-key|ELEVENLABS|cartesia|CARTESIA|sonic-\d|play\.ht|playht|deepgram/i;
+  for (const file of files) {
+    const src = fs.readFileSync(file, "utf8").replace(/ElevenLabs has been removed entirely\./, "");
+    assert.ok(!vendorReference.test(src), `${path.relative(root, file)} references another voice vendor`);
+  }
+});
+
+test("the only speech request David's voice can make goes to OpenAI", () => {
+  const speechUrls = settings.match(/https:\/\/[^'"\s]+/g) || [];
+  assert.deepEqual(speechUrls, ["https://api.openai.com/v1/audio/speech"]);
+  for (const [name, src] of [["api/speech.ts", speech], ["server.ts", server]]) {
+    const fetchTargets = [...src.matchAll(/fetch\(\s*([A-Za-z_$][\w$.]*)/g)].map((m) => m[1]);
+    assert.ok(fetchTargets.includes("OPENAI_SPEECH_URL"), `${name} must fetch OPENAI_SPEECH_URL`);
+  }
+});
+
 test("no environment variable can override the voice", () => {
   assert.ok(!/process\.env\.[A-Z_]*VOICE/.test(speech));
   assert.ok(!/process\.env\.[A-Z_]*VOICE/.test(server));
