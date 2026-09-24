@@ -1,12 +1,15 @@
 import { Readable } from 'node:stream';
 import { sanitizeForDavidSpeech } from '../src/utils/davidSpeechDelivery.js';
 import { getOpenAIApiKey } from '../lib/openaiEnv.js';
+import { requireSignedInUser } from '../lib/chatAccess.js';
 import {
   buildDavidSpeechBody,
   DAVID_TTS_MODEL,
   DAVID_TTS_VOICE,
   OPENAI_SPEECH_URL,
 } from '../src/utils/davidVoiceSettings.js';
+
+const MAX_SPEECH_CHARS = 4000;
 
 function previewLogText(value: string, maxLength = 180): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
@@ -31,12 +34,20 @@ function cleanTranscript(text: string): string {
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  const denied = await requireSignedInUser(req);
+  if (denied) return res.status(denied.status).json({ code: 'AUTH_REQUIRED', error: denied.error });
+
   const { text } = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+
+  // One spoken reply, not a free TTS service: cap what a single call can cost.
+  if (typeof text === 'string' && text.length > MAX_SPEECH_CHARS) {
+    return res.status(413).json({ code: 'text_too_long', error: 'That reply is too long to speak aloud.' });
+  }
 
   if (!text?.trim()) {
     return res.status(400).json({ error: 'Missing text' });

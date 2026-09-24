@@ -59,11 +59,13 @@ type ProfileRecord = {
   email: string | null;
   role: string | null;
   subscription_tier: string | null;
+  stripe_subscription_id: string | null;
+  stripe_subscription_status: string | null;
 };
 
 // Owner lives in profiles.role — subscription_tier is constrained to
 // free | plus | pro by the database, so it can never hold "owner".
-const PROFILE_COLUMNS = "id, email, role, subscription_tier";
+const PROFILE_COLUMNS = "id, email, role, subscription_tier, stripe_subscription_id, stripe_subscription_status";
 
 const isOwnerProfile = (profile: Pick<ProfileRecord, "email" | "role" | "subscription_tier">) =>
   profile.role === "owner"
@@ -153,6 +155,17 @@ const processSubscription = async (
 
   const isOwner = isOwnerProfile(profile);
   const isPaid = PAID_STATUSES.has(subscription.status);
+
+  // An old subscription ending must not downgrade a user who is paying on a
+  // different, still-active one.
+  if (
+    !isPaid
+    && profile.stripe_subscription_id
+    && profile.stripe_subscription_id !== subscription.id
+    && PAID_STATUSES.has(profile.stripe_subscription_status || "")
+  ) {
+    return ignore(`subscription ${subscription.id} is not ${profile.id}'s current subscription`);
+  }
   const update: Record<string, unknown> = {
     subscription_status: isPaid || isOwner ? "active" : subscription.status,
     stripe_customer_id: customerId,
