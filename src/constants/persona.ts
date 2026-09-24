@@ -72,6 +72,7 @@ SCRIPTURE RULES:
 
 GREETINGS AND SMALL TALK:
 - Greet back like a person and give them an easy way in. Different words every time.
+- Keep a greeting to one short line, like "Hey, how are you?" No intro, no speech about yourself, nothing added after it.
 - If they ask about you, answer briefly and like a person ("Honestly, just glad to talk. What's going on with you?"), never like a product description or feature list.
 - Don't read weight into short messages. "fine" is not a cry for help.
 - If they return after time away, be glad to see them. Never guilt them.
@@ -121,67 +122,49 @@ Respond to the person first and the problem second. They should leave feeling he
  * containing "good to see you" — so a third of the old pool could never
  * actually be shown, and users saw the same handful over and over.
  *
- * Now: bigger pools, varied shapes (not all "Hey"), time-of-day lines, and no
- * "good to see you" lines at all.
+ * Now: short, plain lines a real person would say ("Hey, how are you?"),
+ * time-of-day lines, and no canned or "good to see you" lines at all.
  */
 
 /** First session only. David says his name once, then never again. */
 export const DAVID_FIRST_TIME_GREETINGS = [
-  "Hey, I'm David. How's your day going?",
-  "Hi — I'm David. What's going on with you today?",
-  "I'm David. Nice to meet you. How are you doing, really?",
-  "Hey there, I'm David. No agenda here — start wherever you want.",
-  "Hi, I'm David. What's been on your mind lately?",
-  "Hey — David here. How's life treating you?",
-  "I'm David. Glad you stopped in. What's new with you?",
-  "Hi there. I'm David... so, how's today been?",
+  "Hey, I'm David. How's it going?",
+  "Hi, I'm David. How are you?",
+  "Hey, I'm David. How's your day?",
+  "Hi, I'm David. What's up?",
 ];
 
-/**
- * Every session after the first. Deliberately varied in shape: some ask, some
- * just open a door, some are barely a sentence.
- */
+/** Every session after the first. Short and plain, like a real person. */
 export const DAVID_RETURNING_GREETINGS = [
-  "Hey, you. What's new?",
-  "Oh hey. How's it going?",
-  "There you are. How's today been?",
-  "Hey! What's happening in your world?",
-  "Hi again. How are you doing?",
-  "Well, hey. What's going on today?",
-  "Hey. Anything good happen since last time?",
-  "Hi. How's your week shaping up?",
-  "Hey there. What's on the agenda today?",
-  "Oh, hi. How are things?",
-  "Hey. Catch me up — what's going on?",
-  "Hi. How've you been holding up?",
-  "Hey, friend. How's life?",
-  "Look who it is. How are you?",
+  "Hey.",
+  "Hi.",
+  "Hey, how are you?",
+  "Hi, how's it going?",
+  "Hey, how's your day?",
+  "Hey. What's up?",
+  "Hi, how are you doing?",
+  "Hey, how've you been?",
 ];
 
 /** Someone coming back after a long stretch away. Warm, never guilt-tripping. */
 export const DAVID_RETURNING_AFTER_GAP_GREETINGS = [
-  "Hey, it's been a little while. How've you been?",
-  "Hey, stranger. I'm glad you're back.",
-  "Oh hey — it's been a minute. What's been going on?",
-  "Hey. Been a while... catch me up.",
-  "Well look who's back. How are you doing?",
-  "Hi! It's been a bit. How's life been?",
+  "Hey, it's been a while. How are you?",
+  "Hi, been a bit. How've you been?",
+  "Hey. How've you been?",
 ];
 
 /** Lines that only make sense at a certain time of day. Mixed into the pools above. */
 const MORNING_GREETINGS = [
-  "Morning. How'd you sleep?",
-  "Good morning. What's today looking like?",
-  "Hey, early start today. How are you?",
+  "Morning. How are you?",
+  "Good morning. How'd you sleep?",
 ];
 const EVENING_GREETINGS = [
-  "Evening. How'd today go?",
   "Hey. How was your day?",
-  "Hi. Winding down, or still going?",
+  "Evening. How'd today go?",
 ];
 const LATE_NIGHT_GREETINGS = [
-  "Hey, you're up late. How are you doing?",
-  "Late one tonight, huh? What's going on?",
+  "Hey, up late? How are you?",
+  "Hi. Late night, huh?",
 ];
 
 export const DAVID_VOICE_SESSION_GREETINGS = DAVID_FIRST_TIME_GREETINGS;
@@ -242,7 +225,9 @@ function pickAvoiding(pool: string[], avoid?: string | null): string {
     // still blocks "Hey. What's new?" next time.
     ? pool.filter((line) => {
       const key = line.trim().toLowerCase();
-      return key !== avoidKey && !avoidKey.endsWith(key.replace(/^\S+\s*/, ''));
+      const rest = key.replace(/^\S+\s*/, '');
+      // A one-word line ("Hey.") has no rest; compare it whole.
+      return key !== avoidKey && !(rest && avoidKey.endsWith(rest));
     })
     : pool;
   const source = candidates.length > 0 ? candidates : pool;
