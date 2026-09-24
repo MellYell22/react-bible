@@ -896,7 +896,7 @@ export const generateSpeech = async (
   });
   const response = await fetch('/api/speech', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await buildChatRequestHeaders(),
     body: JSON.stringify(speechPayload),
     signal: options.signal,
   });
@@ -1060,6 +1060,7 @@ export const transcribeAudio = async (
   const response = await fetch('/api/transcribe', {
     method: 'POST',
     headers: {
+      ...(await buildChatRequestHeaders()),
       'Content-Type': audioBlob.type || 'audio/webm',
     },
     body: audioBlob,

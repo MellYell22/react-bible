@@ -1,5 +1,6 @@
 import { isMeaningfulTranscript } from '../src/utils/voiceTranscript.mjs';
 import OpenAI from 'openai';
+import { requireSignedInUser } from '../lib/chatAccess.js';
 import {
   getOpenAIApiKey,
   getPublicOpenAIErrorMessage,
@@ -35,10 +36,13 @@ export const config = {
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const denied = await requireSignedInUser(req);
+  if (denied) return res.status(denied.status).json({ code: 'AUTH_REQUIRED', error: denied.error });
 
   try {
     const openaiApiKey = getOpenAIApiKey();

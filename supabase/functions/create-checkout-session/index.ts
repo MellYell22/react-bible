@@ -13,6 +13,7 @@ const PAID_STATUSES = new Set(["active", "trialing"]);
 
 const PRICE_ENV_BY_PLAN = { plus: "STRIPE_PRICE_ID_PLUS", pro: "STRIPE_PRICE_ID_PRO" } as const;
 type CheckoutPlan = keyof typeof PRICE_ENV_BY_PLAN;
+const EXPECTED_MONTHLY_CENTS: Record<CheckoutPlan, number> = { plus: 999, pro: 1299 };
 
 const getPlanLabel = (plan: CheckoutPlan) => (plan === "plus" ? "Bible Plus" : "Bible Pro");
 
@@ -124,6 +125,13 @@ serve(async (req) => {
       return json({ error: `The ${getPlanLabel(requestedPlan)} plan is not available right now. Please contact support.` }, 500);
     }
 
+    // Must match the prices shown in the app (src/constants.ts PLANS). Logged,
+    // not blocked, so a drift is visible in logs without stopping sales.
+    const expectedCents = EXPECTED_MONTHLY_CENTS[requestedPlan];
+    if (price.unit_amount !== expectedCents || price.currency !== "usd") {
+      console.error(`[create-checkout-session] PRICE MISMATCH: ${getPlanLabel(requestedPlan)} is ${price.unit_amount} ${price.currency} in Stripe but the app shows ${expectedCents} usd.`);
+    }
+
     let existingCustomerId: string | null = profile.stripe_customer_id || null;
     if (existingCustomerId) {
       try {
@@ -138,6 +146,46 @@ serve(async (req) => {
     }
 
     const metadata = { userId: user.id, user_id: user.id, app: "bible-mood-search", plan: requestedPlan };
+
+    // Switching Plus <-> Pro must change the EXISTING subscription. A second
+    // checkout would bill both plans, and canceling the old one later would
+    // drop the user to free.
+    if (existingCustomerId) {
+      const ourPrices = new Set(Object.keys(PRICE_ENV_BY_PLAN).map((p) => resolvePriceIdForPlan(p as CheckoutPlan)).filter(Boolean));
+      const { data: subs } = await stripe.subscriptions.list({ customer: existingCustomerId, status: "all", limit: 20 });
+      const current = subs.find((s) => ["active", "trialing", "past_due"].includes(s.status)
+        && s.items.data.some((item) => ourPrices.has(item.price.id)));
+      if (current) {
+        const item = current.items.data.find((i) => ourPrices.has(i.price.id))!;
+        if (item.price.id === selectedPriceId) {
+          return json({ error: `This account is already subscribed to ${getPlanLabel(requestedPlan)}.` }, 409);
+        }
+        const updated = await stripe.subscriptions.update(current.id, {
+          items: [{ id: item.id, price: selectedPriceId }],
+          proration_behavior: "create_prorations",
+          cancel_at_period_end: false,
+          metadata,
+        });
+
+        const writeKey = Deno.env.get("SB_SECRET_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        if (writeKey && PAID_STATUSES.has(updated.status)) {
+          const { error: writeError } = await createClient(supabaseUrl, writeKey)
+            .from("profiles")
+            .update({
+              subscription_tier: requestedPlan,
+              subscription_status: "active",
+              stripe_subscription_id: updated.id,
+              stripe_subscription_status: updated.status,
+              stripe_price_id: selectedPriceId,
+            })
+            .eq("id", user.id);
+          if (writeError) console.error("[create-checkout-session] Plan switched in Stripe; profile update deferred to webhook:", writeError.message);
+        }
+
+        console.log(`[create-checkout-session] Switched ${updated.id} to ${requestedPlan} for user ${user.id}.`);
+        return json({ url: `${appOrigin}/?switched=true&plan=${requestedPlan}`, switched: true });
+      }
+    }
     const sessionOptions: Stripe.Checkout.SessionCreateParams = {
       mode: "subscription",
       payment_method_types: ["card"],

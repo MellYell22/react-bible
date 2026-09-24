@@ -220,3 +220,26 @@ export const checkChatAccess = async (
 
   return allow('under-limit', tier, used, FREE_DAILY_MESSAGE_LIMIT);
 };
+
+/**
+ * Gate for paid-cost endpoints (voice audio, transcription): the caller must
+ * be a signed-in account. Returns null when allowed. Fails open only when Supabase is not configured,
+ * matching checkChatAccess.
+ */
+export const requireSignedInUser = async (
+  req: any,
+): Promise<{ status: number; error: string } | null> => {
+  const supabaseUrl = getSupabaseUrl();
+  const verifyKey = getVerifyKey();
+  if (!supabaseUrl || !verifyKey) return null;
+
+  const token = getBearerToken(req);
+  if (!token) return { status: 401, error: 'Please sign in to use David\'s voice.' };
+
+  const authClient = createClient(supabaseUrl, verifyKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: { user } = { user: null }, error } = await (authClient.auth as any).getUser(token);
+  if (error || !user) return { status: 401, error: 'Your sign-in session expired. Please sign in again.' };
+  return null;
+};
