@@ -4,6 +4,7 @@ import { Check, Heart, Leaf, Sun } from 'lucide-react';
 import { useUser } from '../UserContext';
 import { createCheckoutSession, syncCheckoutSession } from '../services/stripe';
 import { APP_COLORS, APP_FONTS } from '../designSystem';
+import { PLANS } from '../constants';
 
 const PLAN_COPY = [
   {
@@ -11,19 +12,19 @@ const PLAN_COPY = [
     name: 'FREE',
     price: '$0',
     suffix: '',
-    features: ['5 chats per day', '1 reflection per day', 'Access to core features'],
+    features: ['5 chats per day', '3 reflections per day', 'Access to core features'],
   },
   {
     id: 'plus' as const,
     name: 'PLUS',
-    price: '$9.99',
+    price: PLANS.PLUS.price,
     suffix: '/month',
     features: ['Unlimited text chat', 'Expanded reflections', 'Save your favorites', 'Ad-free experience'],
   },
   {
     id: 'pro' as const,
     name: 'PRO',
-    price: '$12.99',
+    price: PLANS.PRO.price,
     suffix: '/month',
     features: ['Everything in Plus', '1 hour of voice chat per month', 'Deeper, personalized reflections', 'Priority support'],
   },

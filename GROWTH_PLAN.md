@@ -2,8 +2,8 @@
 
 ## Model (as built)
 - **Free**: limited chat, mood→scripture, Bible browser — $0
-- **Plus**: unlimited text chat with David — suggested $4.99/mo or $39/yr
-- **Pro**: + David's spoken voice (ElevenLabs) — suggested $9.99/mo or $79/yr
+- **Plus**: unlimited text chat with David — $9.99/mo
+- **Pro**: + David's spoken voice (OpenAI TTS) — $12.99/mo
 
 **Key differentiator:** David's warm, human spoken voice. Lead all marketing with it.
 

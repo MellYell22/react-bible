@@ -13,6 +13,7 @@ const PAID_STATUSES = new Set(["active", "trialing"]);
 
 const PRICE_ENV_BY_PLAN = { plus: "STRIPE_PRICE_ID_PLUS", pro: "STRIPE_PRICE_ID_PRO" } as const;
 type CheckoutPlan = keyof typeof PRICE_ENV_BY_PLAN;
+const EXPECTED_MONTHLY_CENTS: Record<CheckoutPlan, number> = { plus: 999, pro: 1299 };
 
 const getPlanLabel = (plan: CheckoutPlan) => (plan === "plus" ? "Bible Plus" : "Bible Pro");
 
@@ -122,6 +123,13 @@ serve(async (req) => {
     if (!price.active || price.type !== "recurring" || price.recurring?.interval !== "month" || price.livemode !== keyIsLive) {
       console.error(`[create-checkout-session] ${getPlanLabel(requestedPlan)} price is inactive, non-recurring/non-monthly, or in the wrong Stripe mode.`);
       return json({ error: `The ${getPlanLabel(requestedPlan)} plan is not available right now. Please contact support.` }, 500);
+    }
+
+    // Must match the prices shown in the app (src/constants.ts PLANS). Logged,
+    // not blocked, so a drift is visible in logs without stopping sales.
+    const expectedCents = EXPECTED_MONTHLY_CENTS[requestedPlan];
+    if (price.unit_amount !== expectedCents || price.currency !== "usd") {
+      console.error(`[create-checkout-session] PRICE MISMATCH: ${getPlanLabel(requestedPlan)} is ${price.unit_amount} ${price.currency} in Stripe but the app shows ${expectedCents} usd.`);
     }
 
     let existingCustomerId: string | null = profile.stripe_customer_id || null;

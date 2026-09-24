@@ -58,10 +58,10 @@
 - [x] Error handling for API key and quota issues
 - [x] Temperature set to 0.9 for natural variation
 
-### ElevenLabs Text-to-Speech
-- [x] ElevenLabs voice ID configured
-- [x] ElevenLabs model configured for natural speech
-- [x] ElevenLabs MP3 output configured
+### OpenAI Text-to-Speech
+- [x] OpenAI gpt-4o-mini-tts, voice "cedar"
+- [x] Calm delivery instructions configured
+- [x] MP3 output configured
 - [x] Comprehensive error logging
 - [x] Audio format: MP3
 

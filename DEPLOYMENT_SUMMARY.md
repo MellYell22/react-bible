@@ -79,10 +79,10 @@ Your "Bible Mood Search – AI Scripture Companion" app has been comprehensively
 - Error handling for API key and quota issues
 - Temperature set to 0.9 for natural response variation
 
-**ElevenLabs Text-to-Speech (`/api/speech.ts`):**
-- ElevenLabs voice ID configured
-- ElevenLabs model configured for natural speech
-- ElevenLabs text-to-speech endpoint configured for MP3 byte output
+**OpenAI Text-to-Speech (`/api/speech.ts`):**
+- OpenAI `gpt-4o-mini-tts`, voice `cedar` (settings in `src/utils/davidVoiceSettings.ts`)
+- Calm pacing and delivery instructions sent with every request
+- MP3 byte output
 - Comprehensive error logging and handling
 - Audio format: MP3
 
@@ -131,7 +131,7 @@ Your "Bible Mood Search – AI Scripture Companion" app has been comprehensively
 1. **AI Companion "David"** — Warm, emotionally intelligent Christian chat companion
 2. **Bible Scripture Browsing** — Search and read verses by book, chapter, keyword
 3. **Mood-Based Scripture Suggestions** — Relevant verses based on emotional state
-4. **Voice Interaction** — Speech-to-text (Whisper) and text-to-speech (ElevenLabs)
+4. **Voice Interaction** — Speech-to-text (Whisper) and text-to-speech (OpenAI)
 5. **User Authentication** — Manus OAuth login with profile persistence
 6. **Conversation History** — Save and revisit past chat sessions
 7. **Pro Subscription Tier** — Premium features via Stripe integration
@@ -152,11 +152,7 @@ Your "Bible Mood Search – AI Scripture Companion" app has been comprehensively
 Ensure these are configured in your deployment environment:
 
 **Required:**
-- `OPENAI_API_KEY` — OpenAI API key for chat and transcription
-- `ELEVENLABS_API_KEY` — ElevenLabs API key for text-to-speech
-- `ELEVENLABS_VOICE_ID` — ElevenLabs voice ID for David's voice
-- `ELEVENLABS_MODEL` — ElevenLabs model used for speech generation
-- `ELEVENLABS_OUTPUT_FORMAT` — ElevenLabs output format for generated audio
+- `OPENAI_API_KEY` — OpenAI API key for chat, transcription, and David's voice
 
 ---
 
@@ -194,7 +190,6 @@ Before deploying to production:
 - Voice features require microphone permission
 - Some browsers (Safari Private, Firefox Strict ETP) may have audio restrictions
 - Whisper transcription limited to 30+ seconds per request
-- ElevenLabs API has rate limits (check documentation)
 
 ---
 
@@ -202,7 +197,6 @@ Before deploying to production:
 
 **Recommended Monitoring:**
 - OpenAI API usage and errors
-- ElevenLabs API usage and errors
 - User feedback on David's responses
 - Voice feature reliability
 - Performance metrics
