@@ -160,9 +160,14 @@ export function buildDavidSystemPromptFromGuidance(
     ? `\n- Only if you actually used this scripture (a phrase, the reference, or the full verse), end the response with this exact private tracking footer on its own line: [VERSE USED: ${guidance.scripture.reference}]. If you did not use it, do not add the footer.`
     : '\n- Never output any bracketed tracking tags such as [VERSE USED: ...]; they are for internal systems only.';
 
+  // The mood pools were written with spoken filler ("mm…", "yeah…"). Models
+  // copy examples far more than rules, so strip that before it is shown.
+  const reaction = guidance.reaction
+    ? guidance.reaction.replace(/^(?:(?:m+|mhm+|hmm+|hm+|um+|uh+|yeah|man|oh)(?:\.{1,3}|[,!\u2026])?\s+)+/i, '').replace(/^\w/, (c) => c.toUpperCase())
+    : null;
   const inspirationLines = [
-    guidance.reaction
-      ? `- A natural way David might feel this out loud: "${guidance.reaction}" — inspiration only, don't quote it verbatim. Say something in that spirit, in your own words, this turn.`
+    reaction
+      ? `- A natural way David might feel this out loud: "${reaction}" — inspiration only, don't quote it verbatim. Say something in that spirit, in your own words, this turn.`
       : null,
     guidance.followUp
       ? `- A natural closing question David might ask: "${guidance.followUp}" — inspiration only, don't quote it verbatim, and only use a question at all if one genuinely fits.`
