@@ -10,210 +10,51 @@ export type HumanizeOptions = {
   alreadyPrepared?: boolean;
 };
 
-const TRAILING_PAUSE_MARKS = /[\s,;:-]+$/;
+const TRAILING_PAUSE_MARKS = /[\s,;:\u2014-]+$/;
 
-const SCRIPTED_MARKUP_RE =
-  /\[(?:soft\s+breath|breath|inhale|exhale|sigh|pause)\]|\((?:soft\s+breath|breath|inhale|exhale|sigh|pause)\)|\*(?:soft\s+breath|breath|inhale|exhale|sigh|pause)\*/gi;
+// Stage directions the model sometimes writes ("[warmly]", "*sighs*",
+// "(pause)"). The voice would read them aloud, so they never reach speech.
+const CUE_WORDS = "(?:soft(?:ly)?\\s+)?(?:breath|breathes|inhale|exhale|sigh|sighs|pause|pauses|laugh|laughs|chuckle|chuckles|softly|warmly|gently|smiles|nods)";
+const STAGE_DIRECTION_RE = new RegExp(
+  `\\[[a-z][a-z\\s'-]{0,30}\\]|\\*${CUE_WORDS}\\*|\\(${CUE_WORDS}\\)`,
+  "gi",
+);
 
-const ACKNOWLEDGEMENT_PERIOD_RE =
-  /\b(I hear you|I'm with you|I am with you|That feels heavy|That's a lot|That is a lot|I get that|I understand)\.\s+/gi;
-
-const FILLER_PERIOD_RE =
-  /\b(mm+|hmm+|hm+|oh+|ah+|i see|i know|yeah|hey|okay|alright|you know|i mean|well)\.\s+/gi;
-
-const DECIMAL_PLACEHOLDER = '__DAVID_DECIMAL_POINT__';
-const VERSE_COLON_PLACEHOLDER = '__DAVID_VERSE_COLON__';
-
-const protectDecimalPoints = (text: string): string =>
-  text.replace(/(\d)\.(\d)/g, `$1${DECIMAL_PLACEHOLDER}$2`);
-
-const restoreDecimalPoints = (text: string): string =>
-  text.replaceAll(DECIMAL_PLACEHOLDER, '.');
-
-// Chapter:verse references must survive punctuation softening. Without this,
-// "John 3:16" became "John 3, 16" — an unwanted pause mid-reference.
-const protectVerseColons = (text: string): string =>
-  text.replace(/(\d):(\d)/g, `$1${VERSE_COLON_PLACEHOLDER}$2`);
-
-const restoreVerseColons = (text: string): string =>
-  text.replaceAll(VERSE_COLON_PLACEHOLDER, ':');
+// "Mm." / "Mhmm..." / "Um..." at the very start sounds like a stall, not warmth.
+const LEADING_FILLER_RE = /^(?:(?:m+|mm+-?hm+|mhm+|hmm+|hm+|um+|uh+)(?:\.{1,3}|[,!\u2026])?\s+)+/i;
 
 const joinLineBreaksConversationally = (text: string): string => {
   const lines = text
     .replace(/\r\n?/g, '\n')
     .split(/\n+/)
-    .map(line => line.replace(/^[\s*\-\d+.)]+/, '').trim())
+    .map(line => line.replace(/^\s*(?:[*\-\u2022]+|\d+[.)])\s+/, '').trim())
     .filter(Boolean);
 
   return lines.length <= 1 ? text : lines.join(' ');
 };
 
-const softenPunctuationForTts = (text: string): string => {
-  let t = protectVerseColons(protectDecimalPoints(text));
-
-  t = t.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'");
-  t = t.replace(/\s*[\u2013\u2014]\s*/g, ', ');
-  t = t.replace(/\s*[;:]+\s*/g, ', ');
-  t = t.replace(/\s+-\s+/g, ', ');
-  t = t.replace(/\.{4,}/g, '...');
-  t = t.replace(/,{2,}/g, ',');
-  t = t.replace(/\s+,/g, ',');
-  t = t.replace(/([.!?])(?=[^\s.!?])/g, '$1 ');
-
-  return restoreVerseColons(restoreDecimalPoints(t));
-};
-
-// How many hard stops we are willing to soften in a single reply. Softening
-// every one would collapse David into a single breathless run-on sentence.
-const MAX_SOFTENED_STOPS = 3;
-const SHORT_SENTENCE_WORD_LIMIT = 5;
-
-// This is the main cause of the clipped, list-like delivery. When David replies
-// in short declarative sentences — "How are you. What's on your heart." — each
-// full stop becomes a hard pause and he sounds like he is reading bullet
-// points. The previous version only ever fixed the FIRST short sentence because
-// its pattern was anchored to the start of the string, so every later stop
-// survived. This pass softens short stops wherever they occur.
-const softenShortSentenceStops = (text: string): string => {
-  const protectedText = protectVerseColons(protectDecimalPoints(text));
-
-  const chunks = protectedText.match(/[^.!?]+[.!?]+\s*|[^.!?]+$/g);
-
-  if (!chunks || chunks.length < 2) {
-    return restoreVerseColons(restoreDecimalPoints(protectedText));
-  }
-
-  let softenedCount = 0;
-  let result = '';
-
-  for (let index = 0; index < chunks.length; index += 1) {
-    const chunk = chunks[index];
-    const nextChunk = chunks[index + 1];
-    const isLastChunk = index === chunks.length - 1;
-
-    if (isLastChunk || softenedCount >= MAX_SOFTENED_STOPS) {
-      result += chunk;
-      continue;
-    }
-
-    const parsed = chunk.match(/^(\s*)([\s\S]*?)([.!?]+)(\s*)$/);
-
-    if (!parsed) {
-      result += chunk;
-      continue;
-    }
-
-    const [, leadingSpace, body, marks] = parsed;
-
-    // Questions and exclamations carry real intonation — never flatten them.
-    if (marks !== '.') {
-      result += chunk;
-      continue;
-    }
-
-    const trimmedBody = body.trim();
-    const wordCount = trimmedBody.split(/\s+/).filter(Boolean).length;
-
-    if (wordCount === 0 || wordCount > SHORT_SENTENCE_WORD_LIMIT) {
-      result += chunk;
-      continue;
-    }
-
-    // Leave verse references and numbered items alone: "Read Psalm 23."
-    if (/\d$/.test(trimmedBody)) {
-      result += chunk;
-      continue;
-    }
-
-    // Only merge into something that actually continues the thought.
-    if (!nextChunk || !/^\s*["'A-Za-z]/.test(nextChunk)) {
-      result += chunk;
-      continue;
-    }
-
-    result += `${leadingSpace}${trimmedBody}, `;
-    softenedCount += 1;
-  }
-
-  return restoreVerseColons(restoreDecimalPoints(result));
-};
-
-const softenShortInternalStops = (text: string): string => {
-  let t = protectDecimalPoints(text);
-
-  t = t.replace(FILLER_PERIOD_RE, (_match, filler: string) => `${filler}, `);
-
-  t = t.replace(
-    ACKNOWLEDGEMENT_PERIOD_RE,
-    (_match, phrase: string) => `${phrase}, `,
-  );
-
-  t = restoreDecimalPoints(t);
-
-  return softenShortSentenceStops(t);
-};
-
-const addTinyNaturalBreaths = (text: string): string => {
-  let t = text;
-
-  t = t.replace(/\bI'm David, I'm\b/g, "I'm David, and I'm");
-  t = t.replace(/\bI'm David\.\s+/g, "I'm David, ");
-  t = t.replace(
-    /\b(I'm with you|I hear you|That's a lot|That sounds heavy),\s+/gi,
-    '$1, ',
-  );
-
-  return t;
-};
-
-// Previously this truncated David to his first three sentences, which cut him
-// off mid-thought and read as an abrupt stop. Length is a persona/prompt
-// concern, not something the speech layer should silently enforce, so this is
-// now a pass-through. The export is kept so existing imports keep working.
-const lightlyShortenRunOn = (text: string): string => text;
-
+// OpenAI's voice paces itself from the delivery instructions in
+// davidVoiceSettings.ts. Plain punctuation is the approved delivery (sample C):
+// no periods turned into commas, no injected pauses. Only strip what would be
+// read aloud wrongly or sound broken.
 function preparePlainSpeechText(text: string): string {
   let t = text.trim();
 
-  t = t.replace(SCRIPTED_MARKUP_RE, '');
-
+  t = t.replace(STAGE_DIRECTION_RE, ' ');
   t = joinLineBreaksConversationally(t);
+  t = t.replace(/[*_#`\[\]]+/g, '');
 
+  t = t.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'");
+  t = t.replace(/\u2026/g, '...');
+  t = t.replace(/\.{4,}/g, '...');
   t = t.replace(/!{2,}/g, '!');
+  t = t.replace(/\s*\u2014\s*/g, ' \u2014 ');
 
   t = t.replace(/\s+/g, ' ');
+  t = t.replace(/\s+([,.!?;:])/g, '$1');
+  t = t.trim();
 
-  t = t.replace(/\s+([,.!?])/g, '$1');
-
-  t = softenPunctuationForTts(t);
-
-  t = softenShortInternalStops(t);
-
-  t = addTinyNaturalBreaths(t);
-
-  // Softening can leave doubled separators behind.
-  t = t.replace(/,\s*,+/g, ',');
-  t = t.replace(/\s{2,}/g, ' ');
-
-  return t.trim();
-}
-
-export function humanizeForTts(
-  text: string,
-  options: HumanizeOptions = {},
-): string {
-  if (!text) return '';
-
-  let t = preparePlainSpeechText(text);
-
-  t = lightlyShortenRunOn(t);
-
-  t = t.replace(/\bI am\b/g, "I'm");
-  t = t.replace(/\bYou are\b/g, "You're");
-  t = t.replace(/\bIt is\b/g, "It's");
-  t = t.replace(/\bThat is\b/g, "That's");
-  t = t.replace(/\bWe are\b/g, "We're");
-  t = t.replace(/\bThey are\b/g, "They're");
+  t = t.replace(LEADING_FILLER_RE, '');
 
   return t.trim();
 }
@@ -221,15 +62,30 @@ export function humanizeForTts(
 export function sanitizeForDavidSpeech(text: string): string {
   if (!text) return '';
 
-  let t = preparePlainSpeechText(text);
+  return preparePlainSpeechText(text).replace(TRAILING_PAUSE_MARKS, '').trim();
+}
 
-  // Ellipses make text-to-speech insert long breathing pauses; keep the beat short.
-  t = t.replace(/\s*\.{3}\s*/g, ', ');
-  t = t.replace(/,\s*,+/g, ',');
+export function humanizeForTts(
+  text: string,
+  _options: HumanizeOptions = {},
+): string {
+  if (!text) return '';
 
-  t = t.replace(TRAILING_PAUSE_MARKS, '');
+  const t = sanitizeForDavidSpeech(text);
 
-  return t.trim();
+  // Contract David's own words only. Quoted Scripture stays word-for-word.
+  const contracted = t
+    .split(/("[^"]*")/)
+    .map((part) => (part.startsWith('"') ? part : part
+      .replace(/\bI am\b/g, "I'm")
+      .replace(/\bYou are\b/g, "You're")
+      .replace(/\bIt is\b/g, "It's")
+      .replace(/\bThat is\b/g, "That's")
+      .replace(/\bWe are\b/g, "We're")
+      .replace(/\bThey are\b/g, "They're")))
+    .join('');
+
+  return contracted.charAt(0).toUpperCase() + contracted.slice(1);
 }
 
 export function prepareDavidTtsPayload(
