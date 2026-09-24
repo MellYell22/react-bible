@@ -14,7 +14,7 @@ test("plain greetings are recognised, with or without David's name", () => {
 });
 
 test("small talk about David is separated from greetings", () => {
-  for (const text of ["what can you do?", "who are you", "are you real", "what is this", "how does this work"]) {
+  for (const text of ["what can you do?", "who are you", "are you real", "what is this", "how does this work", "how are you David?", "how are you?", "what's going on David?", "what's going on?", "hey David, how are you?"]) {
     assert.equal(detectConversationOpening(text, []), "small-talk", `for ${JSON.stringify(text)}`);
   }
 });

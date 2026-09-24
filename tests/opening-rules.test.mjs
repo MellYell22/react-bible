@@ -57,10 +57,10 @@ test("the header names the specific opening type", () => {
   assert.match(buildOpeningRules("low-signal"), /THIS TURN IS LOW-SIGNAL/);
 });
 
-test("greetings are one plain line with nothing added after", () => {
+test("a bare greeting is short but a question gets an answer", () => {
   const rules = buildOpeningRules("greeting");
-  assert.match(rules, /"Hey\." "Hey, how are you\?" "Hi\." "Good morning\."/);
-  assert.match(rules, /Nothing added after it/i);
+  assert.match(rules, /If they only said hello, greet back warmly/);
+  assert.match(rules, /If they asked a question, answer it directly/);
 });
 
 test("the corny greetings are banned by name", () => {
@@ -79,14 +79,14 @@ test("the corny greetings are banned by name", () => {
 
 test("small-talk gets its own line, low-signal does not", () => {
   const smallTalk = buildOpeningRules("small-talk");
-  assert.match(smallTalk, /They are asking about you/);
+  assert.match(smallTalk, /Answer their exact question plainly/);
   assert.doesNotMatch(smallTalk, /idk.*is not a crisis/);
 });
 
 test("low-signal gets its own line, small-talk does not", () => {
   const lowSignal = buildOpeningRules("low-signal");
   assert.match(lowSignal, /idk.*is not a crisis/);
-  assert.doesNotMatch(lowSignal, /They are asking about you/);
+  assert.doesNotMatch(lowSignal, /Answer their exact question plainly/);
 });
 
 test("an unrecognised opening still returns the shared rules, no crash", () => {

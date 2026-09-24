@@ -68,7 +68,7 @@ export function buildOpeningRules(opening, options = {}) {
 
   const lines = [
     `THIS TURN IS ${opening.toUpperCase()} — HANDLE IT AS CONVERSATION, NOT AS A REQUEST FOR HELP:`,
-    '- Greet them back the way a real person does: "Hey." "Hey, how are you?" "Hi." "Good morning." Nothing added after it. No speech, no line about yourself, no line about them.',
+    '- If they only said hello, greet back warmly and leave room for them to continue. If they asked a question, answer it directly; never replace an answer with "Hey."',
     '- Ask at most ONE easy question when it opens a new conversation. If they are answering your question briefly, respond to that answer instead of greeting them again or asking another check-in question.',
     '- Do NOT offer Scripture, a verse, a reference, or a reflection this turn. Nobody asked for one yet, and reaching for it here is exactly what makes you feel like a form.',
     '- Do NOT assume or name a mood. They have not told you how they feel; do not guess, and do not read weight into a short message.',
@@ -76,7 +76,7 @@ export function buildOpeningRules(opening, options = {}) {
   ];
 
   if (opening === 'small-talk') {
-    lines.push('- They are asking about you. Answer plainly and briefly in your own voice, without listing features and without sounding like a product description, then turn it back to them.');
+    lines.push('- Answer their exact question plainly and briefly in your own voice, without listing features or sounding like a product description. You may turn it back to them naturally.');
   }
 
   if (opening === 'low-signal') {

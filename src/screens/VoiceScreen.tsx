@@ -32,10 +32,10 @@ const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
 // Keep the listener sensitive enough for normal laptop/phone microphones.
 // The previous threshold could leave the recorder running forever on quieter mics,
 // which made David appear to ignore the user after his greeting.
-const SPEECH_VOLUME_THRESHOLD = 0.09;
-/** Voiced audio must persist this long (cumulative) before it counts as the user
- * actually speaking — a stray TV syllable or clatter no longer arms the recorder. */
-const SPEECH_SUSTAIN_MS = 300;
+const SPEECH_VOLUME_THRESHOLD = 0.045;
+/** Catch one-word greetings while still requiring some sustained voice activity.
+ * Transcription filters nonverbal sounds before they become a turn. */
+const SPEECH_SUSTAIN_MS = 120;
 // How long the mic waits after the last voiced audio before deciding the user is
 // done. This is pure dead air at the front of every reply, so it is the single
 // biggest latency win available without rebuilding the voice pipeline.
@@ -159,6 +159,7 @@ export default function VoiceScreen() {
   const listenSessionIdRef = useRef(0);
   const processingRef = useRef(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const unlockedAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
   const audioStopResolverRef = useRef<(() => void) | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -251,6 +252,16 @@ export default function VoiceScreen() {
     }
 
     stopResolver?.();
+  };
+
+  const unlockAudioForSafari = () => {
+    if (Platform.OS !== 'web') return;
+    // iOS Safari requires playback to begin from the user's tap. Keep this
+    // same media element for the later, asynchronous OpenAI speech response.
+    const audio = unlockedAudioRef.current || new Audio();
+    unlockedAudioRef.current = audio;
+    audio.src = 'data:audio/wav;base64,UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA';
+    void audio.play().then(() => audio.pause()).catch(() => {});
   };
 
   const stopVoiceActivity = () => {
@@ -394,8 +405,8 @@ export default function VoiceScreen() {
           lastVadTickAtRef.current = now;
 
           if (normalizedVolume >= SPEECH_VOLUME_THRESHOLD) {
-            // Only count it as the user speaking once voiced audio has been
-            // sustained — brief background sounds (TV, clatter) decay away.
+            // Catch brief greetings; low-confidence and nonverbal audio is
+            // checked again by transcription before David responds.
             voicedMsRef.current += deltaMs;
             if (voicedMsRef.current >= SPEECH_SUSTAIN_MS) {
               speechDetectedRef.current = true;
@@ -721,7 +732,7 @@ export default function VoiceScreen() {
       }
 
       await new Promise<void>((resolve, reject) => {
-        const audio = new Audio(audioUrl);
+        const audio = unlockedAudioRef.current || new Audio();
         let finished = false;
 
         const finish = () => {
@@ -744,6 +755,7 @@ export default function VoiceScreen() {
         currentAudioRef.current = audio;
         currentAudioUrlRef.current = audioUrl;
         audioStopResolverRef.current = finish;
+        audio.src = audioUrl;
         audio.preload = 'auto';
         // Keep David present and close without sounding like he is shouting.
         // Do this only for David's voice instead of globally changing every
@@ -780,7 +792,9 @@ export default function VoiceScreen() {
       // Speech failed — still show the text so the response is not lost.
       options.onPlaybackStart?.();
       const message = `${err?.message || ''}`;
-      const friendlyMessage = /load failed|failed to fetch|network|networkerror|connection/i.test(message)
+      const friendlyMessage = err?.name === 'NotAllowedError'
+        ? 'Your browser blocked David’s audio. Tap Start Conversation to allow sound and try again.'
+        : /load failed|failed to fetch|network|networkerror|connection/i.test(message)
         ? "David's voice connection had a brief problem. Tap Start Conversation and try again."
         : message || 'David had trouble speaking that response.';
       setError(friendlyMessage);
@@ -802,6 +816,7 @@ export default function VoiceScreen() {
       stopListening(true);
       stopVoiceActivity();
       stopCurrentAudio();
+      unlockedAudioRef.current = null;
       // Leaving the voice screen ends voice mode, so nothing can speak after.
       setVoiceModeActive(false);
     };
@@ -934,6 +949,8 @@ export default function VoiceScreen() {
       return;
     }
 
+    unlockAudioForSafari();
+
     const nextConversationId = conversationIdRef.current + 1;
     conversationIdRef.current = nextConversationId;
     requestIdRef.current += 1;
@@ -1043,6 +1060,8 @@ export default function VoiceScreen() {
 
     if (!manualText.trim()) return;
 
+    unlockAudioForSafari();
+
     if (!conversationActiveRef.current) {
       const manualConversationId = conversationIdRef.current + 1;
       conversationIdRef.current = manualConversationId;
@@ -1056,11 +1075,6 @@ export default function VoiceScreen() {
       resumeListening: false,
       source: 'typed',
     });
-
-    if (conversationActiveRef.current && phaseRef.current !== 'error') {
-      conversationActiveRef.current = false;
-      setPhase('idle');
-    }
   };
 
   if (!userContextLoading && !hasVoiceAccess) {
@@ -1253,13 +1267,13 @@ export default function VoiceScreen() {
 
         {inputIsVisible && (
           <View style={styles.textInputContainer}>
-            <Text style={styles.textInputLabel}>Share your mood with David</Text>
+            <Text style={styles.textInputLabel}>Talk with David</Text>
             <View style={styles.textInputRow}>
               <TextInput
                 style={styles.textInputField}
                 value={textInput}
                 onChangeText={setTextInput}
-                placeholder="Tell David how you're feeling..."
+                placeholder="Say hello or tell David what's on your mind..."
                 placeholderTextColor="rgba(212, 175, 55, 0.45)"
                 onSubmitEditing={handleTextSubmit}
                 returnKeyType="send"

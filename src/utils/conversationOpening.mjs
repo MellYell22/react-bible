@@ -25,6 +25,10 @@ const GREETING_PATTERNS = [
 
 /** Small talk about David himself, rather than about the user. */
 const SMALL_TALK_PATTERNS = [
+  /^how\s+(?:are|r)\s+(?:you|u|ya)(?:\s+david)?\s*$/,
+  /^how\s+(?:you|ya)\s+doing(?:\s+david)?\s*$/,
+  /^what'?s\s+going\s+on(?:\s+david)?\s*$/,
+  /^what'?s\s+up(?:\s+david)?\s*$/,
   /^(who|what)\s+(are|r)\s+(you|u)\b/,
   /^what\s+(can|do)\s+you\s+do\b/,
   /^how\s+(does|do)\s+this\s+work\b/,
@@ -100,10 +104,14 @@ function classifyText(normalized) {
   if (!normalized) return null;
   if (normalized.split(' ').length > MAX_OPENING_WORDS) return null;
 
+  // Answer a question even when it contains no mood and never names David.
+  if (SMALL_TALK_PATTERNS.some((pattern) => pattern.test(normalized))) return 'small-talk';
+
   if (GREETING_PATTERNS.some((pattern) => pattern.test(normalized))) {
     const rest = stripGreetingPrefix(normalized);
     // Nothing left, or what's left is itself conversational filler.
     if (!rest) return 'greeting';
+    if (SMALL_TALK_PATTERNS.some((pattern) => pattern.test(rest))) return 'small-talk';
     if (GREETING_PATTERNS.some((pattern) => pattern.test(rest))) return 'greeting';
     if (SMALL_TALK_PATTERNS.some((pattern) => pattern.test(rest))) return 'small-talk';
     if (LOW_SIGNAL_PATTERNS.some((pattern) => pattern.test(rest))) return 'greeting';
