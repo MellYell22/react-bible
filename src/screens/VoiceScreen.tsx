@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Lock, Mic, Send, Sparkles, Square } from 'lucide-react';
+import { useConversation } from '@elevenlabs/react';
 
 import {
   generateSpeech,
@@ -141,6 +142,7 @@ const isMeaningfulUserText = (value: string, source: 'voice' | 'typed' = 'voice'
 };
 
 export default function VoiceScreen() {
+  const elevenLabsConversation = useConversation();
   const { profile, session, loading: userContextLoading } = useUser();
 
   const [phase, setPhaseState] = useState<ScreenPhase>('checking');
@@ -945,79 +947,50 @@ export default function VoiceScreen() {
   };
 
   const handleStartConversation = async () => {
-    if (!(phaseRef.current === 'idle' || phaseRef.current === 'error' || phaseRef.current === 'ended')) {
-      return;
-    }
+    if (elevenLabsConversation.status !== 'disconnected') return;
 
-    unlockAudioForSafari();
+    const userId = session?.user?.id || profile?.id || 'guest';
 
-    const nextConversationId = conversationIdRef.current + 1;
-    conversationIdRef.current = nextConversationId;
-    requestIdRef.current += 1;
-    listenSessionIdRef.current += 1;
-    conversationActiveRef.current = true;
-    processingRef.current = false;
-
-    abortPendingRequests();
-    stopListening(true);
-    stopCurrentAudio();
-    stopVoiceActivity();
-
-    commitMessages([]);
-    setTextInput('');
-    setLastResponseText('');
     setError(null);
-    setPhase('greeting');
+    setLastResponseText('');
+    setPhase('starting');
 
-    const greetingKey = `david:last-voice-greeting:${session?.user?.id || profile?.id || 'guest'}`;
-    let lastGreeting: string | null = null;
-    try { lastGreeting = localStorage.getItem(greetingKey); } catch { /* Storage is optional. */ }
-    // Store the unpersonalized line so the picker can exclude it exactly.
-    const greeting = getVoiceSessionGreeting(undefined, {
-      isReturning: Boolean(lastGreeting),
-      lastGreeting,
-    });
+    try {
+      if (Platform.OS === 'web') {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Microphone access is not available in this browser.');
+        }
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
 
-    // David's greeting MUST be part of the conversation history. Without it,
-    // the server sees the user's first reply as the very first turn (no
-    // assistant message yet), applies the "greet them back" opening rules, and
-    // David repeats his hello instead of answering. Committing it here also
-    // turns on the server's "do not restart the conversation" rule.
-    commitMessages([{ role: 'assistant', content: greeting }]);
+      await elevenLabsConversation.startSession({
+        agentId: 'agent_1901m3h52nn7e5xtyze0e3rkb6q5',
+        userId,
+        dynamicVariables: {
+          user_id: userId,
+        },
+      });
 
-    await playDavidResponseAudio(greeting, {
-      conversationId: nextConversationId,
-      isGreeting: true,
-      resumeListening: true,
-      onPlaybackStart: () => {
-        setLastResponseText(greeting);
-        try { localStorage.setItem(greetingKey, greeting); } catch { /* Storage is optional. */ }
-      },
-    });
+      setPhase('listening');
+    } catch (err: any) {
+      console.error('[David Voice] ElevenLabs session failed to start:', err);
+      setError(err?.message || 'David could not start the voice conversation.');
+      setPhase('error');
+    }
   };
 
-  const handleEndConversation = () => {
-    if (phaseRef.current === 'checking' || phaseRef.current === 'idle' || phaseRef.current === 'ended') {
-      return;
+  const handleEndConversation = async () => {
+    if (elevenLabsConversation.status === 'disconnected') return;
+
+    try {
+      await elevenLabsConversation.endSession();
+      setError(null);
+      setPhase('ended');
+    } catch (err: any) {
+      console.error('[David Voice] ElevenLabs session failed to end:', err);
+      setError(err?.message || 'David could not end the conversation cleanly.');
+      setPhase('error');
     }
-
-    conversationActiveRef.current = false;
-    conversationIdRef.current += 1;
-    requestIdRef.current += 1;
-    listenSessionIdRef.current += 1;
-    processingRef.current = false;
-
-    setError(null);
-    abortPendingRequests();
-    stopListening(true);
-    stopCurrentAudio();
-    stopVoiceActivity();
-    setTextInput('');
-    // The conversation is over: nothing from it lingers on screen or in
-    // memory, so the next Start Conversation begins clean.
-    commitMessages([]);
-    setLastResponseText('');
-    setPhase('ended');
   };
 
   const handleUpgradeToPro = async () => {
