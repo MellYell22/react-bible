@@ -1,0 +1,48 @@
+{
+  "name": "save_user_memory",
+  "type": "webhook",
+  "description": "Saves a new note, important fact, personal preference, or recurring topic about the user to memory storage.",
+  "api_schema": {
+    "url": "https://www.mybibleaicompanion.com/api/david/memory",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "id": "body",
+      "type": "object",
+      "description": "Memory payload to persist for the user.",
+      "required": true,
+      "properties": [
+        {
+          "id": "user_id",
+          "type": "string",
+          "dynamic_variable": "user_id",
+          "required": true,
+          "value_type": "dynamic_variable"
+        },
+        {
+          "id": "short_summary",
+          "type": "string",
+          "description": "A concise factual memory or preference to remember about this user.",
+          "required": true,
+          "value_type": "llm_prompt"
+        },
+        {
+          "id": "category",
+          "type": "string",
+          "description": "Category or topic of the memory (e.g. relationship, preference, work, goal, faith).",
+          "required": false,
+          "value_type": "llm_prompt"
+        }
+      ]
+    },
+    "request_headers": [
+      {
+        "type": "secret",
+        "name": "Authorization",
+        "secret_id": "VoQdP4WMQy4As6e9zmuK"
+      }
+    ],
+    "content_type": "application/json"
+  }
+}
