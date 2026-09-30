@@ -37,7 +37,8 @@
     "stripe": "^17.0.0",
     "tailwind-merge": "^3.5.0",
     "tsx": "^4.21.0",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "@elevenlabs/react": "^1.15.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
