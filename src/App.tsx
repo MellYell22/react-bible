@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { Analytics } from '@vercel/analytics/react';
+import { ConversationProvider } from '@elevenlabs/react';
 import { initAnalytics, recordAppSession, trackEvent } from './services/analytics';
 import { UserProvider, useUser } from './UserContext';
 import AuthScreen from './screens/AuthScreen';
@@ -170,8 +171,10 @@ function AppShell() {
 export default function App() {
   return (
     <UserProvider>
-      <Analytics />
-      <AppShell />
+      <ConversationProvider>
+        <Analytics />
+        <AppShell />
+      </ConversationProvider>
     </UserProvider>
   );
 }
