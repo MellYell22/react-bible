@@ -1,0 +1,28 @@
+{
+  "name": "get_user_memories",
+  "type": "webhook",
+  "description": "Fetches past conversation context, notes, and personal memories for a specific user. Call this at the start of conversation or when recalling previous discussions.",
+  "api_schema": {
+    "url": "https://www.mybibleaicompanion.com/api/david/memory",
+    "method": "GET",
+    "path_params_schema": [],
+    "query_params_schema": [
+      {
+        "id": "user_id",
+        "type": "string",
+        "dynamic_variable": "user_id",
+        "required": true,
+        "value_type": "dynamic_variable"
+      }
+    ],
+    "request_body_schema": null,
+    "request_headers": [
+      {
+        "type": "secret",
+        "name": "Authorization",
+        "secret_id": "VoQdP4WMQy4As6e9zmuK"
+      }
+    ],
+    "content_type": "application/json"
+  }
+}
