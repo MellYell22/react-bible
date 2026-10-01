@@ -15,9 +15,9 @@ import { FullScreenBackground } from '../components/FullScreenBackground';
 const STEPS = [
   {
     id: 'welcome',
-    title: 'Welcome to Sanctuary',
+    title: 'Find Scripture for what you’re feeling.',
     subtitle: 'Your AI Scripture Companion',
-    description: 'A space for peace, reflection, and spiritual growth guided by the wisdom of the Bible.',
+    description: 'Search by mood, reflect on Scripture, and talk with David when you want a calm faith-centered companion.',
     icon: BookOpen,
   },
   {
@@ -30,15 +30,15 @@ const STEPS = [
   {
     id: 'chat',
     title: 'Meet David',
-    subtitle: 'Text chat is free',
-    description: 'Message David anytime for calm, scripture-based encouragement. Text chat is available without the voice upgrade.',
+    subtitle: 'Try David free',
+    description: 'Your account includes 25 introductory messages with David. No payment method is required to try him.',
     icon: MessageCircle,
   },
   {
     id: 'voice',
     title: 'Voice with David',
-    subtitle: 'Optional Pro voice',
-    description: 'If you want a spoken conversation, David also has a live voice experience. Voice is optional — text chat always remains available.',
+    subtitle: '60 voice minutes included',
+    description: 'Try a real spoken conversation with David for up to 60 introductory voice minutes. Upgrade only if you want to keep going after your free time is used.',
     icon: Mic,
   },
   {
