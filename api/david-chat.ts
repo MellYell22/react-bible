@@ -11,7 +11,14 @@ import {
   toRecentTranscript,
 } from '../src/utils/davidContinuity.mjs';
 
-const FREE_DAILY_LIMIT = 5;
+const FREE_INTRO_TEXT_LIMIT = 25;
+
+const getSupabaseServiceClient = () => {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SB_SECRET_KEY || process.env.SUPABASE_SECRET_KEY;
+  if (!supabaseUrl || !serviceKey) return null;
+  return createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+};
 
 /**
  * How far back David actually remembers. The full window feeds the continuity
@@ -157,26 +164,32 @@ export default async function handler(req: any, res: any) {
       || profile?.subscription_tier === 'pro';
 
     if (!isPremium) {
-      const startOfDay = new Date();
-      startOfDay.setUTCHours(0, 0, 0, 0);
-
-      const { count, error: usageCountError } = await supabase
-        .from('daily_feature_usage')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('feature', 'chat')
-        .gte('created_at', startOfDay.toISOString());
-
-      if (usageCountError) {
-        console.error('[David Chat] Could not read daily usage:', usageCountError.message);
+      const serviceClient = getSupabaseServiceClient();
+      if (!serviceClient) {
+        console.error('[David Chat] Server trial metering is not configured.');
+        return res.status(503).json({ code: 'TRIAL_METER_UNAVAILABLE', error: 'David is temporarily unavailable. Please try again shortly.' });
       }
 
-      if ((count ?? 0) >= FREE_DAILY_LIMIT) {
+      const { data: usage, error: usageError } = await serviceClient
+        .from('david_intro_trial_usage')
+        .select('text_messages_used')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (usageError) {
+        console.error('[David Chat] Could not read introductory trial usage:', usageError.message);
+        return res.status(503).json({ code: 'TRIAL_METER_UNAVAILABLE', error: 'David is temporarily unavailable. Please try again shortly.' });
+      }
+
+      const textMessagesUsed = usage?.text_messages_used ?? 0;
+      if (textMessagesUsed >= FREE_INTRO_TEXT_LIMIT) {
         return res.status(429).json({
           limitReached: true,
-          code: 'DAILY_LIMIT_REACHED',
-          feature: 'chat',
-          limit: FREE_DAILY_LIMIT,
+          code: 'INTRO_TRIAL_TEXT_EXHAUSTED',
+          feature: 'david_text',
+          limit: FREE_INTRO_TEXT_LIMIT,
+          used: textMessagesUsed,
+          remaining: 0,
         });
       }
     }
@@ -306,17 +319,26 @@ export default async function handler(req: any, res: any) {
       console.error('[David Chat] Memory insert failed:', memoryInsertError.message);
     }
 
+    let trialRemaining: number | null = null;
     if (!isPremium) {
-      const { error: usageInsertError } = await supabase
-        .from('daily_feature_usage')
-        .insert({ user_id: user.id, feature: 'chat' });
-
-      if (usageInsertError) {
-        console.error('[David Chat] Usage insert failed:', usageInsertError.message);
+      const serviceClient = getSupabaseServiceClient();
+      if (!serviceClient) {
+        console.error('[David Chat] Could not record introductory trial usage because the service client is unavailable.');
+        return res.status(503).json({ code: 'TRIAL_METER_UNAVAILABLE', error: 'David is temporarily unavailable. Please try again shortly.' });
       }
+      const { data: consumeRows, error: consumeError } = await serviceClient.rpc('consume_david_intro_text_message', { p_user_id: user.id });
+      if (consumeError) {
+        console.error('[David Chat] Could not record introductory trial usage:', consumeError.message);
+        return res.status(503).json({ code: 'TRIAL_METER_UNAVAILABLE', error: 'David is temporarily unavailable. Please try again shortly.' });
+      }
+      const consumed = Array.isArray(consumeRows) ? consumeRows[0] : consumeRows;
+      if (!consumed?.allowed) {
+        return res.status(429).json({ limitReached: true, code: 'INTRO_TRIAL_TEXT_EXHAUSTED', feature: 'david_text', limit: FREE_INTRO_TEXT_LIMIT, used: FREE_INTRO_TEXT_LIMIT, remaining: 0 });
+      }
+      trialRemaining = Number(consumed.text_messages_remaining ?? 0);
     }
 
-    return res.status(200).json({ reply });
+    return res.status(200).json({ reply, ...(trialRemaining === null ? {} : { trial: { textMessagesRemaining: trialRemaining } }) });
   } catch (error: any) {
     const status = Number(error?.status || 0);
     const providerCode = String(error?.code || error?.error?.code || '');
