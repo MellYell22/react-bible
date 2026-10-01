@@ -47,15 +47,35 @@ export default function ProfileScreen({ navigation }: any) {
       return;
     }
     setSendingFeedback(true);
+    let feedbackSaved = false;
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) throw new Error('Please sign in again to send feedback.');
       const { error } = await supabase.from('app_feedback').insert({ user_id: user.id, category: feedbackKind, message: feedbackMessage.trim() });
       if (error) throw error;
+      feedbackSaved = true;
+      const delivery = await fetch('https://formsubmit.co/ajax/contact@aa-designs.com', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          _subject: `Bible Mood Search feedback: ${feedbackKind}`,
+          _template: 'table',
+          email: user.email,
+          category: feedbackKind,
+          message: feedbackMessage.trim(),
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const result = await delivery.json();
       setFeedbackMessage('');
-      setFeedbackStatus('Thank you! Your feedback was sent to AA Designs.');
+      if (!delivery.ok || (result.success !== true && result.success !== 'true')) {
+        setFeedbackStatus('Your feedback was saved, but email delivery is unavailable. You can also email contact@aa-designs.com.');
+        return;
+      }
+      setFeedbackStatus('Thank you! Your feedback was submitted to AA Designs.');
     } catch {
-      setFeedbackStatus('Your feedback could not be sent. Please try again or email contact@aa-designs.com.');
+      if (feedbackSaved) setFeedbackMessage('');
+      setFeedbackStatus(feedbackSaved ? 'Your feedback was saved, but email delivery is unavailable. You can also email contact@aa-designs.com.' : 'Your feedback could not be sent. Please try again or email contact@aa-designs.com.');
     } finally { setSendingFeedback(false); }
   };
 
