@@ -16,7 +16,7 @@ import PricingScreen from './screens/PricingScreen';
 import AppNav from './components/AppNav';
 import { APP_COLORS, APP_FONTS } from './designSystem';
 
-type AppRoute = 'Home' | 'Mood' | 'Chat' | 'Voice' | 'Reflection' | 'Bible' | 'Profile' | 'Pricing';
+type AppRoute = 'Home' | 'Mood' | 'Chat' | 'Voice' | 'Reflection' | 'Bible' | 'Profile' | 'Pricing' | 'Auth';
 
 type RouteState = {
   name: AppRoute;
@@ -98,7 +98,7 @@ function AppShell() {
     );
   }
 
-  if (!session) {
+  if (!session || route.name === 'Auth') {
     return (
       <View nativeID="auth-design-shell" style={styles.routeShell}>
         <AuthScreen />
@@ -140,7 +140,7 @@ function AppShell() {
         )}
         {route.name === 'Voice' && (
           <View nativeID="voice-design-shell" style={styles.routeShell}>
-            <VoiceScreen />
+            <VoiceScreen {...screenProps} />
           </View>
         )}
         {route.name === 'Reflection' && (
