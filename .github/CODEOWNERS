@@ -1,0 +1,5 @@
+# David is intentionally stable. Changes to these files require owner review.
+/elevenlabs/david/ @MellYell22
+/src/constants/persona.ts @MellYell22
+/src/utils/davidVoiceSettings.ts @MellYell22
+/src/utils/davidSpeechDelivery.ts @MellYell22
