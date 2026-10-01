@@ -35,7 +35,8 @@ const writeLastGreeting = (greeting: string): void => {
 export default function ChatScreen({ navigation, route }: any) {
   const { width } = useWindowDimensions();
   const compact = width < 760;
-  const { profile } = useUser();
+  const { profile, session } = useUser();
+  const isGuest = session?.user?.id === 'guest' || profile?.id === 'guest';
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -55,6 +56,10 @@ export default function ChatScreen({ navigation, route }: any) {
   const submitMessage = async (rawText: string, baseMessages: ChatMessage[] = messages, clearComposer = true) => {
     const trimmedInput = rawText.trim();
     if (!trimmedInput || loading) return;
+    if (isGuest) {
+      navigation.navigate('Auth');
+      return;
+    }
 
     if (!supabase) {
       setMessages((prev) => [...prev, { role: 'assistant', content: "I can't connect right now. Please refresh and try again." }]);
@@ -217,6 +222,22 @@ export default function ChatScreen({ navigation, route }: any) {
 
   const firstUserMessage = messages.find((message) => message.role === 'user')?.content;
 
+  if (isGuest) {
+    return (
+      <View style={styles.guestGate}>
+        <View style={styles.guestCard}>
+          <UserCircle2 size={48} color={APP_COLORS.gold} />
+          <Text style={styles.guestTitle}>Meet David</Text>
+          <Text style={styles.guestText}>Create a free account to try David with 25 messages and 60 voice minutes. No credit card required.</Text>
+          <TouchableOpacity style={styles.guestButton} onPress={() => navigation.navigate('Auth')} accessibilityRole="button" accessibilityLabel="Create a free account to meet David">
+            <Text style={styles.guestButtonText}>Create Free Account</Text>
+          </TouchableOpacity>
+          <Text style={styles.guestHint}>Your free usage stays with your account, so you can continue where you left off.</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.layout, compact && styles.layoutCompact]}>
@@ -301,6 +322,13 @@ export default function ChatScreen({ navigation, route }: any) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, minHeight: 0, backgroundColor: APP_COLORS.navy },
+  guestGate: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: APP_COLORS.navy },
+  guestCard: { width: '100%', maxWidth: 460, alignItems: 'center', padding: 30, borderWidth: 1, borderColor: APP_COLORS.border, backgroundColor: APP_COLORS.navyDeep },
+  guestTitle: { color: APP_COLORS.gold, fontFamily: APP_FONTS.serif, fontSize: 24, fontWeight: '700', marginTop: 14 },
+  guestText: { color: APP_COLORS.cream, fontFamily: APP_FONTS.sans, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 10 },
+  guestButton: { width: '100%', minHeight: 48, marginTop: 20, backgroundColor: APP_COLORS.gold, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
+  guestButtonText: { color: APP_COLORS.navyDeep, fontFamily: APP_FONTS.sans, fontSize: 12, fontWeight: '800' },
+  guestHint: { color: APP_COLORS.muted, fontFamily: APP_FONTS.sans, fontSize: 10, lineHeight: 16, textAlign: 'center', marginTop: 10 },
   layout: { flex: 1, flexDirection: 'row', minHeight: 0, padding: 10, gap: 10 },
   layoutCompact: { padding: 8 },
   sidebar: { width: 230, borderWidth: 1, borderColor: APP_COLORS.border, backgroundColor: APP_COLORS.navyDeep, padding: 12 },
