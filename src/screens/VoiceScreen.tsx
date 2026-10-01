@@ -152,6 +152,9 @@ export default function VoiceScreen() {
   const [error, setError] = useState<string | null>(null);
   const [voiceLevels, setVoiceLevels] = useState<number[]>(IDLE_VOICE_LEVELS);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [trialVoiceSecondsRemaining, setTrialVoiceSecondsRemaining] = useState<number | null>(null);
+  const [trialUsageLoading, setTrialUsageLoading] = useState(true);
+  const trialVoiceStartedAtRef = useRef<number | null>(null);
 
   const phaseRef = useRef<ScreenPhase>('checking');
   const messagesRef = useRef<ChatTurn[]>([]);
@@ -186,11 +189,45 @@ export default function VoiceScreen() {
   const chatAbortControllerRef = useRef<AbortController | null>(null);
   const speechAbortControllerRef = useRef<AbortController | null>(null);
 
-  const hasVoiceAccess = useMemo(() => {
+  const hasPaidVoiceAccess = useMemo(() => {
     if (profile && hasProAccess(profile)) return true;
     const email = session?.user?.email?.toLowerCase();
     return email === OWNER_EMAIL.toLowerCase();
   }, [profile, session?.user?.email]);
+  const hasVoiceAccess = hasPaidVoiceAccess || (trialVoiceSecondsRemaining !== null && trialVoiceSecondsRemaining > 0);
+
+  const getTrialHeaders = async () => {
+    const { supabase: sb } = await import('../services/supabase');
+    if (!sb) throw new Error('Please sign in to try David.');
+    const { data: { session: currentSession } } = await sb.auth.getSession();
+    if (!currentSession?.access_token) throw new Error('Please sign in to try David.');
+    return { 'Content-Type': 'application/json', Authorization: `Bearer ${currentSession.access_token}` };
+  };
+
+  const refreshTrialUsage = async () => {
+    if (hasPaidVoiceAccess) { setTrialVoiceSecondsRemaining(null); setTrialUsageLoading(false); return; }
+    if (!session?.user?.id) { setTrialVoiceSecondsRemaining(0); setTrialUsageLoading(false); return; }
+    try {
+      const response = await fetch('/api/david-trial', { headers: await getTrialHeaders() });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Unable to check free voice time.');
+      setTrialVoiceSecondsRemaining(Number(data?.voice?.remainingSeconds ?? 0));
+    } catch (trialError: any) {
+      console.error('[David Voice] Trial usage check failed:', trialError);
+      setTrialVoiceSecondsRemaining(0);
+    } finally { setTrialUsageLoading(false); }
+  };
+
+  const recordTrialVoiceUsage = async () => {
+    if (hasPaidVoiceAccess || trialVoiceStartedAtRef.current === null) return;
+    const elapsed = Math.max(1, Math.ceil((Date.now() - trialVoiceStartedAtRef.current) / 1000));
+    trialVoiceStartedAtRef.current = Date.now();
+    try {
+      const response = await fetch('/api/david-trial', { method: 'POST', headers: await getTrialHeaders(), body: JSON.stringify({ voiceSeconds: elapsed }) });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setTrialVoiceSecondsRemaining(Number(data?.voice?.remainingSeconds ?? 0));
+    } catch (trialError) { console.error('[David Voice] Trial usage record failed:', trialError); }
+  };
 
   const setPhase = (next: ScreenPhase | ((current: ScreenPhase) => ScreenPhase)) => {
     const resolved = typeof next === 'function' ? next(phaseRef.current) : next;
@@ -825,6 +862,10 @@ export default function VoiceScreen() {
   }, []);
 
   useEffect(() => {
+    if (!userContextLoading) void refreshTrialUsage();
+  }, [userContextLoading, session?.user?.id, hasPaidVoiceAccess]);
+
+  useEffect(() => {
     if (userContextLoading) return;
     if (hasVoiceAccess) {
       // This screen is the only place voice mode is ever switched on.
@@ -948,6 +989,7 @@ export default function VoiceScreen() {
 
   const handleStartConversation = async () => {
     if (elevenLabsConversation.status !== 'disconnected') return;
+    if (!hasVoiceAccess) { setError('Your free David voice time is used up. Upgrade to Pro to keep talking.'); return; }
 
     const userId = session?.user?.id || profile?.id || 'guest';
 
@@ -971,6 +1013,7 @@ export default function VoiceScreen() {
         },
       });
 
+      if (!hasPaidVoiceAccess) trialVoiceStartedAtRef.current = Date.now();
       setPhase('listening');
     } catch (err: any) {
       console.error('[David Voice] ElevenLabs session failed to start:', err);
@@ -981,6 +1024,8 @@ export default function VoiceScreen() {
 
   const handleEndConversation = async () => {
     if (elevenLabsConversation.status === 'disconnected') return;
+    await recordTrialVoiceUsage();
+    trialVoiceStartedAtRef.current = null;
 
     try {
       await elevenLabsConversation.endSession();
@@ -1050,7 +1095,7 @@ export default function VoiceScreen() {
     });
   };
 
-  if (!userContextLoading && !hasVoiceAccess) {
+  if (!userContextLoading && !trialUsageLoading && !hasVoiceAccess) {
     return (
       <View style={styles.lockedContainer}>
         <View style={styles.lockCard}>
@@ -1176,6 +1221,9 @@ export default function VoiceScreen() {
           </View>
         </View>
 
+        {!hasPaidVoiceAccess && trialVoiceSecondsRemaining !== null && (
+          <Text style={styles.trialVoiceCounter}>{Math.ceil(trialVoiceSecondsRemaining / 60)} free voice minutes left</Text>
+        )}
         <View style={styles.conversationControls}>
           <TouchableOpacity
             style={[
@@ -1482,6 +1530,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#d4af37',
     boxShadow: '0 4px 8px rgba(212, 175, 55, 0.35)',
   },
+  trialVoiceCounter: { color: '#c8b46b', fontSize: 10, textAlign: 'center', marginBottom: 8 },
   conversationControls: {
     width: '100%',
     maxWidth: 620,
