@@ -42,6 +42,7 @@ export default function ChatScreen({ navigation, route }: any) {
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const [limitReached, setLimitReached] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [trialMessagesRemaining, setTrialMessagesRemaining] = useState<number | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const initialPromptHandledRef = useRef<string | null>(null);
@@ -86,7 +87,7 @@ export default function ChatScreen({ navigation, route }: any) {
       });
 
       const data = await response.json().catch(() => ({}));
-      if (response.status === 429 || data?.limitReached || data?.code === 'DAILY_LIMIT_REACHED') {
+      if (response.status === 429 || data?.limitReached || data?.code === 'INTRO_TRIAL_TEXT_EXHAUSTED') {
         trackEvent('chat_limit_reached');
         setLimitReached(true);
         setMessages(baseMessages);
@@ -97,6 +98,7 @@ export default function ChatScreen({ navigation, route }: any) {
 
       const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
       if (!reply) throw new Error('David returned an empty response.');
+      if (typeof data?.trial?.textMessagesRemaining === 'number') setTrialMessagesRemaining(data.trial.textMessagesRemaining);
       setMessages([...nextMessages, { role: 'assistant', content: reply }]);
     } catch (error: any) {
       console.error('Chat Error:', error);
@@ -267,6 +269,9 @@ export default function ChatScreen({ navigation, route }: any) {
             </ScrollView>
           )}
 
+          {!isPaid && trialMessagesRemaining !== null && (
+            <Text style={styles.trialCounter}>{trialMessagesRemaining} free David messages left</Text>
+          )}
           <View style={styles.composerRow}>
             <TextInput
               style={styles.composer}
@@ -323,6 +328,7 @@ const styles = StyleSheet.create({
   messageText: { color: APP_COLORS.cream, fontFamily: APP_FONTS.display, fontSize: 15, lineHeight: 23 },
   userMessageText: { color: APP_COLORS.goldSoft, textAlign: 'right' },
   messageActions: { flexDirection: 'row', gap: 10, marginTop: 7, alignItems: 'center' },
+  trialCounter: { color: APP_COLORS.muted, fontFamily: APP_FONTS.sans, fontSize: 9, textAlign: 'center', paddingVertical: 5 },
   composerRow: { minHeight: 60, borderTopWidth: 1, borderTopColor: APP_COLORS.borderSoft, flexDirection: 'row', alignItems: 'stretch', padding: 10 },
   composer: { flex: 1, borderWidth: 1, borderColor: APP_COLORS.border, backgroundColor: APP_COLORS.navy, color: APP_COLORS.cream, fontFamily: APP_FONTS.sans, fontSize: 11, paddingHorizontal: 12, paddingVertical: 10, maxHeight: 100 },
   sendButton: { width: 48, marginLeft: 10, backgroundColor: APP_COLORS.gold, alignItems: 'center', justifyContent: 'center' },
