@@ -2,85 +2,46 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, useWindowDimensions } from 'react-native';
 import { MoodResponse } from '../types';
 import { Search, Frown, Wind, User, Heart, Flame, Sun, HelpCircle, Layers, Cloud, X, Bookmark, Check } from 'lucide-react';
-import { supabase, saveScripture } from '../services/supabase';
+import { saveScripture } from '../services/supabase';
 import { MOODS_DATA } from '../constants/moods';
 import { MessageCircle, Mic } from 'lucide-react';
 import { useUser } from '../UserContext';
 
 const MOOD_CONFIG = [
-  { key: 'ANXIOUS', label: 'Anxious', icon: Wind },
-  { key: 'SAD', label: 'Sad', icon: Frown },
-  { key: 'LONELY', label: 'Lonely', icon: User },
-  { key: 'STRESSED', label: 'Stressed', icon: Wind },
-  { key: 'OVERWHELMED', label: 'Overwhelmed', icon: Layers },
-  { key: 'HOPEFUL', label: 'Hopeful', icon: Sun },
-  { key: 'GRATEFUL', label: 'Grateful', icon: Heart },
-  { key: 'ANGRY', label: 'Angry', icon: Flame },
-  { key: 'CONFUSED', label: 'Confused', icon: HelpCircle },
-  { key: 'JOYFUL', label: 'Joyful', icon: Sun },
+  { key: 'ANXIOUS', label: 'Anxious', icon: Wind }, { key: 'SAD', label: 'Sad', icon: Frown },
+  { key: 'LONELY', label: 'Lonely', icon: User }, { key: 'STRESSED', label: 'Stressed', icon: Wind },
+  { key: 'OVERWHELMED', label: 'Overwhelmed', icon: Layers }, { key: 'HOPEFUL', label: 'Hopeful', icon: Sun },
+  { key: 'GRATEFUL', label: 'Grateful', icon: Heart }, { key: 'ANGRY', label: 'Angry', icon: Flame },
+  { key: 'CONFUSED', label: 'Confused', icon: HelpCircle }, { key: 'JOYFUL', label: 'Joyful', icon: Sun },
   { key: 'PEACEFUL', label: 'Peaceful', icon: Cloud },
 ];
-
 const NT_BOOKS = ['Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
 
 export default function MoodScreen({ route, navigation }: any) {
-  const { profile } = useUser();
-  const { width } = useWindowDimensions();
-  const compact = width < 760;
-  const [mood, setMood] = useState(route?.params?.mood || '');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<MoodResponse | null>(null);
-  const [testamentFilter, setTestamentFilter] = useState<'all'|'old'|'new'>('all');
-  const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
-  const [savingId, setSavingId] = useState<number | null>(null);
-
-  React.useEffect(() => { if (route?.params?.mood) handleInitialSearch(route.params.mood); }, [route?.params?.mood]);
-
-  const handleInitialSearch = async (initialMood: string) => {
-    const staticMood = MOODS_DATA.find(m => m.key === initialMood.toUpperCase());
-    if (staticMood) {
-      setResult({ scriptures: staticMood.scriptures.map(s => ({ ...s, explanation: "Reflecting on God's word for your heart today." })), encouragement: '' });
-      setLoading(false);
-    }
-  };
-
-  const handleSearch = async () => {
-    const query = (searchQuery || mood).trim();
-    if (!query) return;
-    const staticMood = MOODS_DATA.find(m => m.label.toLowerCase() === query.toLowerCase() || m.key === query.toUpperCase());
-    if (staticMood) {
-      setMood(staticMood.key);
-      setResult({ scriptures: staticMood.scriptures.map(s => ({ ...s, explanation: "Reflecting on God's word for your heart today." })), encouragement: '' });
-      setLoading(false);
-    }
-  };
-
-  const filteredScriptures = result?.scriptures.filter(item => {
-    if (testamentFilter === 'all') return true;
-    const bookName = item.reference.split(' ')[0];
-    const fullBookName = item.reference.match(/^[1-3]?\s?[a-zA-Z\s]+(?=\s\d)/)?.[0] || bookName;
-    const isNT = NT_BOOKS.includes(fullBookName.trim());
-    return testamentFilter === 'new' ? isNT : !isNT;
-  }) || [];
-
-  const handleSave = async (item: any, index: number) => {
-    if (!profile || savingId !== null || savedIds.has(index)) return;
-    setSavingId(index);
-    try {
-      await saveScripture(profile.id, item, profile.preferred_translation || 'KJV', mood || 'Search');
-      setSavedIds(prev => new Set(prev).add(index));
-    } finally { setSavingId(null); }
-  };
-
-  return <View style={styles.container}><ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-    <View style={styles.headingBlock}><Text style={styles.title}>{mood ? `REFLECTIONS ON ${mood}` : 'HOW ARE YOU FEELING?'}</Text><Text style={styles.subtitle}>SELECT A MOOD TO FIND SCRIPTURE, OR TELL DAVID IN YOUR OWN WORDS.</Text></View>
-    <View style={styles.searchRow}><View style={styles.searchBox}><Search size={19} color="#e1b632"/><TextInput style={styles.searchInput} placeholder="I am feeling..." placeholderTextColor="rgba(255,248,231,0.58)" value={searchQuery} onChangeText={setSearchQuery} onSubmitEditing={handleSearch}/>{searchQuery.length>0&&<TouchableOpacity onPress={()=>setSearchQuery('')} style={styles.clearButton}><X size={15} color="#f1d477"/></TouchableOpacity>}</View><TouchableOpacity style={styles.searchButton} onPress={handleSearch}><Text style={styles.searchButtonText}>SEARCH</Text></TouchableOpacity></View>
-    <View style={styles.moodGrid}>{MOOD_CONFIG.map(m=><TouchableOpacity key={m.key} style={[styles.moodTile,compact&&styles.moodTileCompact,mood===m.key&&styles.moodTileActive]} onPress={()=>{setSearchQuery('');setMood(m.key);handleInitialSearch(m.key)}}><m.icon size={28} color="#e1b632" strokeWidth={1.8}/><Text style={styles.moodTileText}>{m.label}</Text></TouchableOpacity>)}</View>
+  const { profile } = useUser(); const { width } = useWindowDimensions();
+  const compact = width < 760; const phone = width < 480;
+  const [mood,setMood]=useState(route?.params?.mood||''); const [searchQuery,setSearchQuery]=useState('');
+  const [loading,setLoading]=useState(false); const [result,setResult]=useState<MoodResponse|null>(null);
+  const [testamentFilter,setTestamentFilter]=useState<'all'|'old'|'new'>('all');
+  const [savedIds,setSavedIds]=useState<Set<number>>(new Set()); const [savingId,setSavingId]=useState<number|null>(null);
+  React.useEffect(()=>{if(route?.params?.mood)handleInitialSearch(route.params.mood)},[route?.params?.mood]);
+  const handleInitialSearch=async(initialMood:string)=>{const s=MOODS_DATA.find(m=>m.key===initialMood.toUpperCase());if(s){setResult({scriptures:s.scriptures.map(x=>({...x,explanation:"Reflecting on God's word for your heart today."})),encouragement:''});setLoading(false)}};
+  const handleSearch=async()=>{const q=(searchQuery||mood).trim();if(!q)return;const s=MOODS_DATA.find(m=>m.label.toLowerCase()===q.toLowerCase()||m.key===q.toUpperCase());if(s){setMood(s.key);setResult({scriptures:s.scriptures.map(x=>({...x,explanation:"Reflecting on God's word for your heart today."})),encouragement:''});setLoading(false)}};
+  const filteredScriptures=result?.scriptures.filter(item=>{if(testamentFilter==='all')return true;const bookName=item.reference.split(' ')[0];const full=item.reference.match(/^[1-3]?\s?[a-zA-Z\s]+(?=\s\d)/)?.[0]||bookName;const isNT=NT_BOOKS.includes(full.trim());return testamentFilter==='new'?isNT:!isNT})||[];
+  const handleSave=async(item:any,index:number)=>{if(!profile||savingId!==null||savedIds.has(index))return;setSavingId(index);try{await saveScripture(profile.id,item,profile.preferred_translation||'KJV',mood||'Search');setSavedIds(p=>new Set(p).add(index))}finally{setSavingId(null)}};
+  return <View style={styles.container}><ScrollView style={styles.scrollView} contentContainerStyle={[styles.content,phone&&styles.contentPhone]}>
+    <View style={styles.headingBlock}><Text style={[styles.title,phone&&styles.titlePhone]}>{mood?`REFLECTIONS ON ${mood}`:'HOW ARE YOU FEELING?'}</Text><Text style={styles.subtitle}>SELECT A MOOD TO FIND SCRIPTURE, OR TELL DAVID IN YOUR OWN WORDS.</Text></View>
+    <View style={styles.searchRow}><View style={styles.searchBox}><Search size={19} color="#e1b632"/><TextInput style={styles.searchInput} placeholder="I am feeling..." placeholderTextColor="rgba(255,248,231,0.58)" value={searchQuery} onChangeText={setSearchQuery} onSubmitEditing={handleSearch}/>{searchQuery.length>0&&<TouchableOpacity onPress={()=>setSearchQuery('')} style={styles.clearButton}><X size={15} color="#f1d477"/></TouchableOpacity>}</View><TouchableOpacity style={[styles.searchButton,phone&&styles.searchButtonPhone]} onPress={handleSearch}><Text style={styles.searchButtonText}>SEARCH</Text></TouchableOpacity></View>
+    <View style={styles.moodGrid}>{MOOD_CONFIG.map(m=><TouchableOpacity key={m.key} style={[styles.moodTile,compact&&styles.moodTileCompact,phone&&styles.moodTilePhone,mood===m.key&&styles.moodTileActive]} onPress={()=>{setSearchQuery('');setMood(m.key);handleInitialSearch(m.key)}}><m.icon size={28} color="#e1b632" strokeWidth={1.8}/><Text style={styles.moodTileText}>{m.label}</Text></TouchableOpacity>)}</View>
     {!mood&&!loading&&<View style={styles.chatPrompt}><View style={styles.promptRule}/><Text style={styles.promptTitle}>NOT SURE HOW YOU FEEL?</Text><Text style={styles.promptText}>Talk to David and just share what’s on your mind.</Text><View style={[styles.davidCtaRow,compact&&styles.davidCtaRowCompact]}><TouchableOpacity style={styles.chatCta} onPress={()=>navigation.navigate('Chat')}><MessageCircle size={19} color="#071a35"/><Text style={styles.chatCtaText}>CHAT WITH DAVID</Text></TouchableOpacity><TouchableOpacity style={styles.voiceCta} onPress={()=>navigation.navigate('Voice')}><Mic size={19} color="#e1b632"/><Text style={styles.voiceCtaText}>VOICE WITH DAVID</Text></TouchableOpacity></View></View>}
     {loading&&<View style={styles.loadingContainer}><ActivityIndicator size="large" color="#e1b632"/></View>}
     {result&&!loading&&<View style={styles.resultContainer}><View style={styles.filterRow}>{(['all','old','new'] as const).map(filter=><TouchableOpacity key={filter} style={[styles.filterButton,testamentFilter===filter&&styles.filterButtonActive]} onPress={()=>setTestamentFilter(filter)}><Text style={[styles.filterText,testamentFilter===filter&&styles.filterTextActive]}>{filter==='all'?'ALL':filter==='old'?'OLD TESTAMENT':'NEW TESTAMENT'}</Text></TouchableOpacity>)}</View><Text style={styles.sectionTitle}>RELEVANT SCRIPTURES</Text>{filteredScriptures.length===0?<View style={styles.noResults}><Text style={styles.noResultsText}>No scriptures found in this testament for your search.</Text></View>:filteredScriptures.map((item,index)=><View key={`${item.reference}-${index}`} style={styles.scriptureCard}><View style={styles.scriptureHeader}><Text style={styles.referenceText}>{item.reference}</Text><TouchableOpacity onPress={()=>handleSave(item,index)} disabled={savingId===index||savedIds.has(index)}>{savingId===index?<ActivityIndicator size="small" color="#e1b632"/>:savedIds.has(index)?<Check size={18} color="#54ba83"/>:<Bookmark size={18} color="#e1b632"/>}</TouchableOpacity></View><Text style={styles.verseText}>“{item.verse}”</Text>{!!item.explanation&&<Text style={styles.explanationText}>{item.explanation}</Text>}</View>)}</View>}
   </ScrollView></View>;
 }
-
-const styles=StyleSheet.create({container:{flex:1,backgroundColor:'#071a35'},scrollView:{flex:1},content:{width:'100%',maxWidth:1180,alignSelf:'center',paddingHorizontal:24,paddingTop:28,paddingBottom:42},headingBlock:{alignItems:'center',marginBottom:20},title:{color:'#e1b632',fontFamily:'Cinzel',fontSize:28,fontWeight:'700',letterSpacing:.7,textAlign:'center'},subtitle:{color:'#f1d477',fontFamily:'Cinzel',fontSize:9,fontWeight:'600',letterSpacing:1,marginTop:7,textAlign:'center'},searchRow:{flexDirection:'row',alignItems:'stretch',marginBottom:16},searchBox:{flex:1,minHeight:46,flexDirection:'row',alignItems:'center',gap:11,borderWidth:1,borderColor:'rgba(225,182,50,0.68)',backgroundColor:'#03101f',paddingHorizontal:14},searchInput:{flex:1,color:'#fff8e7',fontFamily:'Playfair Display',fontSize:14,fontStyle:'italic',paddingVertical:10},clearButton:{padding:4},searchButton:{width:120,backgroundColor:'#e1b632',borderWidth:1,borderColor:'#f1d477',alignItems:'center',justifyContent:'center'},searchButtonText:{color:'#071a35',fontFamily:'Cinzel',fontSize:10,fontWeight:'700',letterSpacing:1},moodGrid:{flexDirection:'row',flexWrap:'wrap',justifyContent:'space-between',gap:10},moodTile:{width:'32%',minHeight:100,borderWidth:1,borderColor:'rgba(225,182,50,0.62)',backgroundColor:'#071a35',alignItems:'center',justifyContent:'center',gap:8},moodTileCompact:{width:'48.5%',minHeight:92},moodTileActive:{backgroundColor:'#0a2346',borderWidth:2,borderColor:'#e1b632'},moodTileText:{color:'#fff8e7',fontFamily:'Inter',fontSize:12,fontWeight:'600'},chatPrompt:{alignItems:'center',marginTop:28},promptRule:{width:170,height:1,backgroundColor:'rgba(225,182,50,0.72)',marginBottom:18},promptTitle:{color:'#e1b632',fontFamily:'Cinzel',fontSize:16,fontWeight:'700',letterSpacing:.8},promptText:{color:'#fff8e7',fontFamily:'Playfair Display',fontSize:13,marginTop:8,textAlign:'center'},davidCtaRow:{width:'100%',maxWidth:680,marginTop:15,flexDirection:'row',gap:12,justifyContent:'center'},davidCtaRowCompact:{flexDirection:'column',alignItems:'stretch'},chatCta:{flex:1,minHeight:46,paddingHorizontal:24,backgroundColor:'#e1b632',flexDirection:'row',gap:10,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#e1b632'},chatCtaText:{color:'#071a35',fontFamily:'Cinzel',fontSize:11,fontWeight:'700',letterSpacing:.8},voiceCta:{flex:1,minHeight:46,paddingHorizontal:24,backgroundColor:'transparent',flexDirection:'row',gap:10,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#e1b632'},voiceCtaText:{color:'#e1b632',fontFamily:'Cinzel',fontSize:11,fontWeight:'700',letterSpacing:.8},loadingContainer:{paddingVertical:34,alignItems:'center'},resultContainer:{marginTop:28,gap:14},filterRow:{flexDirection:'row',flexWrap:'wrap',gap:8},filterButton:{borderWidth:1,borderColor:'rgba(225,182,50,0.48)',paddingHorizontal:13,paddingVertical:8,backgroundColor:'#03101f'},filterButtonActive:{backgroundColor:'#e1b632'},filterText:{color:'#f1d477',fontFamily:'Cinzel',fontSize:8,fontWeight:'700'},filterTextActive:{color:'#071a35'},sectionTitle:{color:'#e1b632',fontFamily:'Cinzel',fontSize:14,fontWeight:'700',letterSpacing:1,marginTop:4},scriptureCard:{borderWidth:1,borderColor:'rgba(225,182,50,0.48)',backgroundColor:'#0a2141',padding:18},scriptureHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10},referenceText:{color:'#e1b632',fontFamily:'Cinzel',fontSize:12,fontWeight:'700',letterSpacing:.7},verseText:{color:'#fff8e7',fontFamily:'Playfair Display',fontSize:18,lineHeight:27,fontStyle:'italic'},explanationText:{color:'rgba(255,248,231,0.72)',fontFamily:'Inter',fontSize:12,lineHeight:19,marginTop:10},noResults:{borderWidth:1,borderColor:'rgba(225,182,50,0.38)',padding:18},noResultsText:{color:'#f1d477',fontFamily:'Inter',fontSize:12,textAlign:'center'}});
+const styles=StyleSheet.create({
+container:{flex:1,backgroundColor:'#071a35'},scrollView:{flex:1},content:{width:'100%',maxWidth:1180,alignSelf:'center',paddingHorizontal:24,paddingTop:28,paddingBottom:42},contentPhone:{paddingHorizontal:14,paddingTop:20},
+headingBlock:{alignItems:'center',marginBottom:20},title:{color:'#e1b632',fontFamily:'Cinzel',fontSize:28,fontWeight:'700',letterSpacing:.7,textAlign:'center'},titlePhone:{fontSize:24},subtitle:{color:'#f1d477',fontFamily:'Cinzel',fontSize:9,fontWeight:'600',letterSpacing:1,marginTop:7,textAlign:'center'},
+searchRow:{flexDirection:'row',alignItems:'stretch',marginBottom:16,width:'100%'},searchBox:{flex:1,minWidth:0,minHeight:46,flexDirection:'row',alignItems:'center',gap:11,borderWidth:1,borderColor:'rgba(225,182,50,0.68)',backgroundColor:'#03101f',paddingHorizontal:14},searchInput:{flex:1,minWidth:0,color:'#fff8e7',fontFamily:'Playfair Display',fontSize:14,fontStyle:'italic',paddingVertical:10},clearButton:{padding:4},searchButton:{width:120,backgroundColor:'#e1b632',borderWidth:1,borderColor:'#f1d477',alignItems:'center',justifyContent:'center'},searchButtonPhone:{width:92},searchButtonText:{color:'#071a35',fontFamily:'Cinzel',fontSize:10,fontWeight:'700',letterSpacing:1},
+moodGrid:{width:'100%',flexDirection:'row',flexWrap:'wrap',justifyContent:'space-between',gap:10},moodTile:{width:'32%',minHeight:100,borderWidth:1,borderColor:'rgba(225,182,50,0.62)',backgroundColor:'#071a35',alignItems:'center',justifyContent:'center',gap:8},moodTileCompact:{width:'48.5%',minHeight:92},moodTilePhone:{width:'48%',minHeight:92},moodTileActive:{backgroundColor:'#0a2346',borderWidth:2,borderColor:'#e1b632'},moodTileText:{color:'#fff8e7',fontFamily:'Inter',fontSize:12,fontWeight:'600'},
+chatPrompt:{alignItems:'center',marginTop:28},promptRule:{width:170,height:1,backgroundColor:'rgba(225,182,50,0.72)',marginBottom:18},promptTitle:{color:'#e1b632',fontFamily:'Cinzel',fontSize:16,fontWeight:'700',letterSpacing:.8},promptText:{color:'#fff8e7',fontFamily:'Playfair Display',fontSize:13,marginTop:8,textAlign:'center'},davidCtaRow:{width:'100%',maxWidth:680,marginTop:15,flexDirection:'row',gap:12,justifyContent:'center'},davidCtaRowCompact:{flexDirection:'column',alignItems:'stretch'},chatCta:{flex:1,minHeight:46,paddingHorizontal:24,backgroundColor:'#e1b632',flexDirection:'row',gap:10,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#e1b632'},chatCtaText:{color:'#071a35',fontFamily:'Cinzel',fontSize:11,fontWeight:'700',letterSpacing:.8},voiceCta:{flex:1,minHeight:46,paddingHorizontal:24,backgroundColor:'transparent',flexDirection:'row',gap:10,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#e1b632'},voiceCtaText:{color:'#e1b632',fontFamily:'Cinzel',fontSize:11,fontWeight:'700',letterSpacing:.8},
+loadingContainer:{paddingVertical:34,alignItems:'center'},resultContainer:{marginTop:28,gap:14},filterRow:{flexDirection:'row',flexWrap:'wrap',gap:8},filterButton:{borderWidth:1,borderColor:'rgba(225,182,50,0.48)',paddingHorizontal:13,paddingVertical:8,backgroundColor:'#03101f'},filterButtonActive:{backgroundColor:'#e1b632'},filterText:{color:'#f1d477',fontFamily:'Cinzel',fontSize:8,fontWeight:'700'},filterTextActive:{color:'#071a35'},sectionTitle:{color:'#e1b632',fontFamily:'Cinzel',fontSize:14,fontWeight:'700',letterSpacing:1,marginTop:4},scriptureCard:{borderWidth:1,borderColor:'rgba(225,182,50,0.48)',backgroundColor:'#0a2141',padding:18},scriptureHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:10},referenceText:{color:'#e1b632',fontFamily:'Cinzel',fontSize:12,fontWeight:'700',letterSpacing:.7},verseText:{color:'#fff8e7',fontFamily:'Playfair Display',fontSize:18,lineHeight:27,fontStyle:'italic'},explanationText:{color:'rgba(255,248,231,0.72)',fontFamily:'Inter',fontSize:12,lineHeight:19,marginTop:10},noResults:{borderWidth:1,borderColor:'rgba(225,182,50,0.38)',padding:18},noResultsText:{color:'#f1d477',fontFamily:'Inter',fontSize:12,textAlign:'center'}});
