@@ -141,9 +141,10 @@ const isMeaningfulUserText = (value: string, source: 'voice' | 'typed' = 'voice'
   return isMeaningfulTranscript(text);
 };
 
-export default function VoiceScreen() {
+export default function VoiceScreen({ navigation }: any) {
   const elevenLabsConversation = useConversation();
   const { profile, session, loading: userContextLoading } = useUser();
+  const isGuest = session?.user?.id === 'guest' || profile?.id === 'guest';
 
   const [phase, setPhaseState] = useState<ScreenPhase>('checking');
   const [textInput, setTextInput] = useState('');
@@ -206,6 +207,7 @@ export default function VoiceScreen() {
 
   const refreshTrialUsage = async () => {
     if (hasPaidVoiceAccess) { setTrialVoiceSecondsRemaining(null); setTrialUsageLoading(false); return; }
+    if (isGuest) { setTrialVoiceSecondsRemaining(0); setTrialUsageLoading(false); return; }
     if (!session?.user?.id) { setTrialVoiceSecondsRemaining(0); setTrialUsageLoading(false); return; }
     try {
       const response = await fetch('/api/david-trial', { headers: await getTrialHeaders() });
@@ -1094,6 +1096,22 @@ export default function VoiceScreen() {
       source: 'typed',
     });
   };
+
+  if (!userContextLoading && isGuest) {
+    return (
+      <View style={styles.lockedContainer}>
+        <View style={styles.lockCard}>
+          <Lock color="#d4af37" size={48} style={{ marginBottom: 20 }} />
+          <Text style={styles.lockTitle} role="heading" aria-level={1}>Meet David</Text>
+          <Text style={styles.lockText}>Create a free account to try David with 25 messages and 60 voice minutes. No credit card required.</Text>
+          <TouchableOpacity style={styles.lockUpgradeButton} onPress={() => navigation.navigate('Auth')} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Create a free account to meet David">
+            <Text style={styles.lockUpgradeButtonText}>Create Free Account</Text>
+          </TouchableOpacity>
+          <Text style={styles.lockUpgradeHint}>Your free usage stays with your account, so you can continue where you left off.</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!userContextLoading && !trialUsageLoading && !hasVoiceAccess) {
     return (
