@@ -19,7 +19,7 @@ const CANCELLATION_REASONS = [
   'Other',
 ] as const;
 
-type Section = 'account' | 'subscription' | 'saved' | 'settings' | 'help' | null;
+type Section = 'account' | 'subscription' | 'saved' | 'settings' | 'help' | 'feedback' | null;
 
 export default function ProfileScreen({ navigation }: any) {
   const { profile, signOut, refreshProfile } = useUser();
@@ -33,6 +33,31 @@ export default function ProfileScreen({ navigation }: any) {
   const [cancellationReason, setCancellationReason] = useState<string | null>(null);
   const [cancellationDetails, setCancellationDetails] = useState('');
   const [submittingCancellationFeedback, setSubmittingCancellationFeedback] = useState(false);
+
+  const [feedbackKind, setFeedbackKind] = useState('bug');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
+  const [sendingFeedback, setSendingFeedback] = useState(false);
+
+  const submitFeedback = async () => {
+    if (sendingFeedback || !feedbackMessage.trim()) return;
+    setFeedbackStatus(null);
+    if (!supabase || !profile || profile.id === 'guest') {
+      setFeedbackStatus('Please sign in to send feedback, or email contact@aa-designs.com.');
+      return;
+    }
+    setSendingFeedback(true);
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) throw new Error('Please sign in again to send feedback.');
+      const { error } = await supabase.from('app_feedback').insert({ user_id: user.id, category: feedbackKind, message: feedbackMessage.trim() });
+      if (error) throw error;
+      setFeedbackMessage('');
+      setFeedbackStatus('Thank you! Your feedback was sent to AA Designs.');
+    } catch {
+      setFeedbackStatus('Your feedback could not be sent. Please try again or email contact@aa-designs.com.');
+    } finally { setSendingFeedback(false); }
+  };
 
   const [billing, setBilling] = useState<SubscriptionStatus | null>(null);
   const [loadingBilling, setLoadingBilling] = useState(false);
@@ -138,6 +163,7 @@ export default function ProfileScreen({ navigation }: any) {
     { key: 'subscription' as const, label: 'Subscription', icon: ShieldCheck, onPress: () => toggleSection('subscription') },
     { key: 'saved' as const, label: 'Saved Reflections', icon: Bookmark, onPress: () => toggleSection('saved') },
     { key: 'settings' as const, label: 'Settings', icon: Settings, onPress: () => toggleSection('settings') },
+    { key: 'feedback' as const, label: 'Send Feedback', icon: Mail, onPress: () => toggleSection('feedback') },
     { key: 'help' as const, label: 'Help & Support', icon: HelpCircle, onPress: () => toggleSection('help') },
   ];
 
@@ -261,6 +287,27 @@ export default function ProfileScreen({ navigation }: any) {
               <Text style={styles.toggleLabel}>Daily notifications</Text>
               <View style={[styles.toggleBox, profile?.verse_of_the_day_enabled && styles.toggleBoxActive]}>{profile?.verse_of_the_day_enabled && <Check size={14} color={APP_COLORS.navyDeep} />}</View>
             </TouchableOpacity>
+          </View>
+        )}
+
+        {section === 'feedback' && (
+          <View style={styles.detailPanel}>
+            <Text style={styles.detailTitle}>SEND FEEDBACK</Text>
+            <Text style={styles.helpText}>Found a problem or have an idea? Tell AA Designs what happened and which screen you were using. Please do not include passwords or payment details.</Text>
+            <View style={[styles.optionRow, { marginTop: 14 }]}>
+              {[['bug', 'REPORT A BUG'], ['suggestion', 'SUGGESTION'], ['other', 'OTHER']].map(([value, label]) => (
+                <TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{ selected: feedbackKind === value }} style={[styles.optionButton, feedbackKind === value && styles.optionButtonActive]} onPress={() => setFeedbackKind(value)} disabled={sendingFeedback}>
+                  <Text style={[styles.optionText, feedbackKind === value && styles.optionTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput accessibilityLabel="Your feedback" style={styles.feedbackInput} value={feedbackMessage} onChangeText={setFeedbackMessage} placeholder="Tell us about your experience…" placeholderTextColor="rgba(241,212,119,0.45)" multiline maxLength={2000} editable={!sendingFeedback} textAlignVertical="top" />
+            <Text style={styles.subscriptionNote}>{feedbackMessage.length}/2000 characters</Text>
+            {feedbackStatus && <Text accessibilityLiveRegion="polite" style={styles.statusText}>{feedbackStatus}</Text>}
+            <TouchableOpacity accessibilityRole="button" style={[styles.manageButton, (!feedbackMessage.trim() || sendingFeedback) && styles.modalButtonDisabled]} onPress={() => void submitFeedback()} disabled={!feedbackMessage.trim() || sendingFeedback}>
+              <Text style={styles.manageButtonText}>{sendingFeedback ? 'SENDING…' : 'SEND FEEDBACK'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contactRow} onPress={contactSupport}><Mail size={16} color={APP_COLORS.gold} /><Text style={styles.contactEmail}>Or email {SUPPORT_EMAIL}</Text></TouchableOpacity>
           </View>
         )}
 

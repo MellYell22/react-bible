@@ -43,6 +43,8 @@ declare module 'react-native' {
   export class ActivityIndicator extends React.Component<any> {}
   export class Pressable extends React.Component<any> {}
   export class TouchableOpacity extends React.Component<any> {}
+  export class Image extends React.Component<any> {}
+  export const Linking: { openURL(url: string): Promise<void> };
   export class Text extends React.Component<any> {}
 
   export const StyleSheet: any;
