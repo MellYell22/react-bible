@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { Analytics } from '@vercel/analytics/react';
 import { ConversationProvider } from '@elevenlabs/react';
-import { initAnalytics, recordAppSession, trackEvent } from './services/analytics';
+import { initAnalytics, recordAppSession, setAnalyticsSuppressed, trackEvent } from './services/analytics';
 import { UserProvider, useUser } from './UserContext';
 import AuthScreen from './screens/AuthScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
@@ -15,6 +15,7 @@ import ProfileScreen from './screens/ProfileScreen';
 import PricingScreen from './screens/PricingScreen';
 import AppNav from './components/AppNav';
 import { APP_COLORS, APP_FONTS } from './designSystem';
+import { isOwner } from './utils/tier';
 
 type AppRoute = 'Home' | 'Mood' | 'Chat' | 'Voice' | 'Reflection' | 'Bible' | 'Profile' | 'Pricing' | 'Auth';
 
@@ -57,6 +58,11 @@ function AppShell() {
   const [onboardingCompletedLocally, setOnboardingCompletedLocally] = useState(false);
   const paidTracked = useRef(false);
 
+  // Owner/admin testing must not pollute public visitor or funnel analytics.
+  useEffect(() => {
+    if (!loading) setAnalyticsSuppressed(isOwner(profile));
+  }, [loading, profile]);
+
   useEffect(() => {
     initAnalytics();
     if (paidTracked.current) return;
@@ -70,7 +76,7 @@ function AppShell() {
     if (!loading) {
       recordAppSession(session?.user?.id);
     }
-  }, [loading, session?.user?.id]);
+  }, [loading, profile, session?.user?.id]);
 
   useEffect(() => {
     setOnboardingCompletedLocally(false);
@@ -168,11 +174,18 @@ function AppShell() {
   );
 }
 
+function AppAnalytics() {
+  const { profile, loading } = useUser();
+  if (loading) return null;
+
+  return <Analytics beforeSend={(event) => (isOwner(profile) ? null : event)} />;
+}
+
 export default function App() {
   return (
     <UserProvider>
       <ConversationProvider>
-        <Analytics />
+        <AppAnalytics />
         <AppShell />
       </ConversationProvider>
     </UserProvider>
