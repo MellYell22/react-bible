@@ -5,7 +5,7 @@ export const OWNER_EMAIL = 'alissasmith.apps@gmail.com';
 // Owner lives in profiles.role. The database constrains subscription_tier to
 // free | plus | pro, so it can never hold 'owner' — the tier check below is a
 // legacy safety net only, and role is the source of truth.
-const isOwner = (profile: Profile | null): boolean => {
+export const isOwner = (profile: Profile | null): boolean => {
   if (!profile) return false;
   return profile.role === 'owner'
     || profile.email?.toLowerCase() === OWNER_EMAIL
