@@ -21,6 +21,13 @@ export type FunnelEvent =
 
 type Props = Record<string, string | number | boolean | null>;
 
+let analyticsSuppressed = false;
+
+/** Suppress public analytics for owner/admin testing sessions. */
+export const setAnalyticsSuppressed = (suppressed: boolean): void => {
+  analyticsSuppressed = suppressed;
+};
+
 /**
  * First-touch attribution. A visitor lands from a TikTok bio link tagged
  * `?utm_source=tiktok&utm_content=script1`, then signs up and pays days
@@ -71,6 +78,8 @@ export const initAnalytics = (): void => {
 };
 
 export const trackEvent = (event: FunnelEvent, props: Props = {}): void => {
+  if (analyticsSuppressed) return;
+
   try {
     track(event, { ...readFirstTouch(), ...props });
   } catch (error) {
@@ -102,6 +111,8 @@ const daysBetween = (earlier: string, later: string): number | null => {
 
 /** Records one privacy-friendly session per browser tab session. */
 export const recordAppSession = (userId?: string | null): void => {
+  if (analyticsSuppressed) return;
+
   const localStorage = getStorage('local');
   const sessionStorage = getStorage('session');
   if (!localStorage || !sessionStorage) return;
