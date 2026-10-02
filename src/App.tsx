@@ -176,9 +176,12 @@ function AppShell() {
 
 function AppAnalytics() {
   const { profile, loading } = useUser();
-  if (loading) return null;
 
-  return <Analytics beforeSend={(event) => (isOwner(profile) ? null : event)} />;
+  // Do not mount Vercel Analytics at all for the owner. This prevents the
+  // initial page-view beacon from racing ahead of owner detection.
+  if (loading || isOwner(profile)) return null;
+
+  return <Analytics />;
 }
 
 export default function App() {
