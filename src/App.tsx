@@ -176,10 +176,22 @@ function AppShell() {
 
 function AppAnalytics() {
   const { profile, loading } = useUser();
+  const ownerMarkerKey = 'bible_mood_search_owner_analytics_opt_out';
 
-  // Do not mount Vercel Analytics at all for the owner. This prevents the
-  // initial page-view beacon from racing ahead of owner detection.
-  if (loading || isOwner(profile)) return null;
+  // Once this browser has authenticated as the owner, remember that locally.
+  // On future page loads this lets us block Vercel Analytics immediately,
+  // before the async profile lookup can race with the first page-view beacon.
+  const browserMarkedAsOwner =
+    typeof window !== 'undefined' && window.localStorage.getItem(ownerMarkerKey) === '1';
+
+  useEffect(() => {
+    if (loading || typeof window === 'undefined') return;
+    if (isOwner(profile)) {
+      window.localStorage.setItem(ownerMarkerKey, '1');
+    }
+  }, [loading, profile]);
+
+  if (loading || browserMarkedAsOwner || isOwner(profile)) return null;
 
   return <Analytics />;
 }
