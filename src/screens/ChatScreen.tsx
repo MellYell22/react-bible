@@ -272,7 +272,7 @@ export default function ChatScreen({ navigation, route }: any) {
               <Text style={styles.emptyText}>Share what’s on your mind, ask a question, or simply{`\n`}tell David how you’re feeling.</Text>
             </View>
           ) : (
-            <ScrollView ref={scrollViewRef} style={styles.messages} contentContainerStyle={styles.messagesContent} keyboardShouldPersistTaps="handled">
+            <ScrollView ref={scrollViewRef} style={styles.messages} contentContainerStyle={[styles.messagesContent, !compact && styles.centeredConversation]} keyboardShouldPersistTaps="handled">
               {messages.map((msg, index) => (
                 <View key={index} style={[styles.messageRow, msg.role === 'user' && styles.userMessageRow]}>
                   <Text style={styles.messageAuthor}>{msg.role === 'user' ? 'YOU' : 'DAVID'}</Text>
@@ -293,7 +293,7 @@ export default function ChatScreen({ navigation, route }: any) {
           {!isPaid && trialMessagesRemaining !== null && (
             <Text style={styles.trialCounter}>{trialMessagesRemaining} free David messages left</Text>
           )}
-          <View style={styles.composerRow}>
+          <View style={[styles.composerRow, !compact && styles.centeredConversation]}>
             <TextInput
               style={styles.composer}
               placeholder="Type a message..."
@@ -350,6 +350,7 @@ const styles = StyleSheet.create({
   emptyText: { color: APP_COLORS.cream, fontFamily: APP_FONTS.sans, fontSize: 10, lineHeight: 16, textAlign: 'center', marginTop: 7 },
   messages: { flex: 1, minHeight: 0 },
   messagesContent: { padding: 18 },
+  centeredConversation: { width: '100%', maxWidth: 760, alignSelf: 'center' },
   messageRow: { width: '88%', alignSelf: 'flex-start', marginBottom: 18 },
   userMessageRow: { alignSelf: 'flex-end', alignItems: 'flex-end' },
   messageAuthor: { color: APP_COLORS.gold, fontFamily: APP_FONTS.serif, fontSize: 8, fontWeight: '700', letterSpacing: 1, marginBottom: 5 },
