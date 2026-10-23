@@ -285,9 +285,24 @@ export const processStripeEvent = async ({
       );
     }
 
-    case 'invoice.payment_failed':
-      logger.warn('[Stripe Webhook] Payment failed; access will follow the next subscription status event.');
-      return { processed: true, reason: 'payment_failed_acknowledged' };
+    case 'invoice.payment_failed': {
+      // Do not rely on a later webhook arriving: reconcile against Stripe now.
+      // Stripe may legitimately keep a subscription active during retries,
+      // so use its current status rather than revoking access blindly.
+      const invoice = event.data.object as Stripe.Invoice;
+      const subscriptionId = getStripeId((invoice as any).subscription);
+      if (!subscriptionId) return ignore(logger, `failed invoice ${invoice.id} has no subscription`);
+
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      return processSubscription(
+        stripe,
+        supabase,
+        subscription,
+        tierPrices,
+        logger,
+        invoice.customer_email || null,
+      );
+    }
 
     default:
       return ignore(logger, `unsupported event type ${event.type}`);
