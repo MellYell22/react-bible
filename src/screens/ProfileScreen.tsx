@@ -6,7 +6,7 @@ import { supabase, deleteSavedScripture, getSavedScriptures, toggleMemorized, up
 import { SavedScripture } from '../types';
 import { APP_COLORS, APP_FONTS } from '../designSystem';
 import { requestSubscription, SubscriptionStatus } from '../services/stripe';
-import { OWNER_EMAIL, hasProAccess } from '../utils/tier';
+import { OWNER_EMAIL, getAccessTier, hasProAccess } from '../utils/tier';
 
 const SUPPORT_EMAIL = 'contact@aa-designs.com';
 
@@ -83,8 +83,8 @@ export default function ProfileScreen({ navigation }: any) {
   const [loadingBilling, setLoadingBilling] = useState(false);
   const [confirmCancellation, setConfirmCancellation] = useState(false);
 
-  const tier = profile?.subscription_tier;
-  const isOwner = profile?.email?.toLowerCase() === OWNER_EMAIL.toLowerCase() || tier === 'owner';
+  const tier = getAccessTier(profile);
+  const isOwner = tier === 'owner';
   const isPaid = tier === 'plus' || tier === 'pro' || isOwner;
 
   const loadSaved = async () => {
@@ -215,7 +215,7 @@ export default function ProfileScreen({ navigation }: any) {
           <View style={styles.detailPanel}>
             <Text style={styles.detailTitle}>ACCOUNT INFORMATION</Text>
             <View style={styles.infoRow}><Mail size={15} color={APP_COLORS.gold} /><Text style={styles.infoText}>{profile?.email || 'Guest'}</Text></View>
-            <View style={styles.infoRow}><ShieldCheck size={15} color={APP_COLORS.gold} /><Text style={styles.infoText}>Plan: {isOwner ? 'Owner' : (profile?.subscription_tier || 'free').toUpperCase()}</Text></View>
+            <View style={styles.infoRow}><ShieldCheck size={15} color={APP_COLORS.gold} /><Text style={styles.infoText}>Plan: {isOwner ? 'Owner' : tier.toUpperCase()}</Text></View>
           </View>
         )}
 
@@ -223,7 +223,7 @@ export default function ProfileScreen({ navigation }: any) {
           <View style={styles.detailPanel}>
             <Text style={styles.detailTitle}>SUBSCRIPTION</Text>
             {status && <Text style={styles.statusText}>{status}</Text>}
-            <Text style={styles.helpText}>Current plan: {isOwner ? 'OWNER' : (profile?.subscription_tier || 'free').toUpperCase()}</Text>
+            <Text style={styles.helpText}>Current plan: {isOwner ? 'OWNER' : tier.toUpperCase()}</Text>
             {isPaid && !isOwner ? (
               <>
                 <Text style={styles.subscriptionNote}>{loadingBilling ? 'Loading subscription…' : billing ? `${billing.cancelAtPeriodEnd ? 'Canceled — access ends' : billing.status + ' — current period ends'} ${new Date(billing.currentPeriodEnd * 1000).toLocaleDateString()}` : 'Subscription status could not be loaded.'}</Text>

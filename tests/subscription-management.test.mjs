@@ -67,7 +67,7 @@ test('profile flow: questionnaire, feedback, keep subscription, confirm, refresh
     useEffect: (fn, deps) => { if (deps.length === 2 && deps[0] === 'subscription') effect = fn; },
     useUser: () => ({ profile: { id: 'user_own', subscription_tier: 'pro' }, refreshProfile: async () => {}, signOut() {} }),
     requestSubscription: async action => { const response = await app.request({ action, confirm: action === 'cancel' }); if (!response.ok) throw Error('billing error'); return response.json(); },
-    supabase, APP_COLORS: {}, APP_FONTS: {}, OWNER_EMAIL: 'owner@example.com', hasProAccess: () => true, console,
+    supabase, APP_COLORS: {}, APP_FONTS: {}, OWNER_EMAIL: 'owner@example.com', hasProAccess: () => true, getAccessTier: () => 'pro', console,
   };
   vm.createContext(context); vm.runInContext(code + '\nthis.render = ProfileScreen;', context);
   const render = () => { cursor = 0; return context.render({}); };

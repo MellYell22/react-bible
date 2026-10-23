@@ -4,6 +4,7 @@ import {
   deriveSubscriptionTier,
   getStripeId,
   getSubscriptionPriceIds,
+  isPaidSubscriptionStatus,
   matchTierByPriceIds,
 } from './subscriptionState.js';
 
@@ -14,8 +15,14 @@ type Logger = Pick<Console, 'log' | 'warn' | 'error'>;
 type ProfileRecord = {
   id: string;
   email: string | null;
+  role?: string | null;
   subscription_tier: string | null;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  stripe_subscription_status?: string | null;
 };
+
+const PROFILE_COLUMNS = 'id, email, role, subscription_tier, stripe_customer_id, stripe_subscription_id, stripe_subscription_status';
 
 type ProfileLookup = {
   profile: ProfileRecord;
@@ -77,7 +84,7 @@ const findProfile = async (
   if (userId) {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, subscription_tier')
+      .select(PROFILE_COLUMNS)
       .eq('id', userId)
       .limit(1)
       .maybeSingle();
@@ -88,7 +95,7 @@ const findProfile = async (
   if (customerId) {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, subscription_tier')
+      .select(PROFILE_COLUMNS)
       .eq('stripe_customer_id', customerId)
       .limit(1)
       .maybeSingle();
@@ -99,7 +106,7 @@ const findProfile = async (
   if (email) {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, subscription_tier')
+      .select(PROFILE_COLUMNS)
       .ilike('email', email)
       .limit(1)
       .maybeSingle();
@@ -144,7 +151,8 @@ const saveSubscription = async (
   };
 
   if (periodEnd) update.stripe_current_period_end = periodEnd;
-  if (profile.subscription_tier !== 'owner') update.subscription_tier = nextTier;
+  // Owner access lives in profiles.role and is never touched by billing.
+  if (profile.subscription_tier !== 'owner' && profile.role !== 'owner') update.subscription_tier = nextTier;
 
   const { data, error } = await supabase
     .from('profiles')
@@ -214,6 +222,36 @@ const processSubscription = async (
     );
   }
 
+  const { profile } = lookup;
+
+  // An email match is only a fallback. If that profile is already tied to a
+  // different Stripe customer, this subscription is not theirs.
+  if (
+    lookup.matchedBy === 'email'
+    && profile.stripe_customer_id
+    && customerId
+    && profile.stripe_customer_id !== customerId
+  ) {
+    return ignore(
+      logger,
+      `subscription ${subscription.id} matched ${profile.id} by email only, but that profile belongs to another Stripe customer`,
+    );
+  }
+
+  // An old subscription ending (or a stale event for it) must never downgrade
+  // someone who is paying on a different, still-current subscription.
+  if (
+    profile.stripe_subscription_id
+    && profile.stripe_subscription_id !== subscription.id
+    && isPaidSubscriptionStatus(profile.stripe_subscription_status)
+    && !isPaidSubscriptionStatus(subscription.status)
+  ) {
+    return ignore(
+      logger,
+      `subscription ${subscription.id} (${subscription.status}) is not ${profile.id}'s current subscription`,
+    );
+  }
+
   logger.log(`[Stripe Webhook] Matched subscription ${subscription.id} by ${lookup.matchedBy}.`);
   return saveSubscription(supabase, lookup.profile, customerId, subscription, tierPrices, logger);
 };
@@ -259,14 +297,20 @@ export const processStripeEvent = async ({
 
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
-    case 'customer.subscription.deleted':
-      return processSubscription(
-        stripe,
-        supabase,
-        event.data.object as Stripe.Subscription,
-        tierPrices,
-        logger,
-      );
+    case 'customer.subscription.deleted': {
+      // Stripe does not guarantee delivery order, and retries can replay old
+      // events. Always write Stripe's CURRENT state, never the snapshot in the
+      // event payload, so a late "active" event cannot resurrect a canceled
+      // subscription and duplicates are harmless.
+      const eventSubscription = event.data.object as Stripe.Subscription;
+      let subscription = eventSubscription;
+      try {
+        subscription = await stripe.subscriptions.retrieve(eventSubscription.id);
+      } catch (error: any) {
+        logger.warn(`[Stripe Webhook] Could not refresh subscription ${eventSubscription.id}; using event payload: ${error?.message || error}`);
+      }
+      return processSubscription(stripe, supabase, subscription, tierPrices, logger);
+    }
 
     case 'invoice.paid':
     case 'invoice.payment_succeeded': {

@@ -21,6 +21,7 @@ import { getDavidGreeting } from '../constants/persona';
 import DailyLimitUpgrade from '../components/DailyLimitUpgrade';
 import { trackEvent } from '../services/analytics';
 import { APP_COLORS, APP_FONTS } from '../designSystem';
+import { hasPremiumAccess } from '../utils/tier';
 
 const LAST_GREETING_KEY = 'david:last-greeting';
 
@@ -48,10 +49,7 @@ export default function ChatScreen({ navigation, route }: any) {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const initialPromptHandledRef = useRef<string | null>(null);
 
-  const isPaid = profile?.role === 'owner'
-    || profile?.subscription_tier === 'owner'
-    || profile?.subscription_tier === 'plus'
-    || profile?.subscription_tier === 'pro';
+  const isPaid = hasPremiumAccess(profile);
 
   const submitMessage = async (rawText: string, baseMessages: ChatMessage[] = messages, clearComposer = true) => {
     const trimmedInput = rawText.trim();

@@ -1,37 +1,36 @@
 import { Profile } from '../types';
+import {
+  OWNER_EMAIL as SHARED_OWNER_EMAIL,
+  canUsePremium,
+  canUsePro,
+  isOwnerAccount,
+  resolveAccessTier,
+} from '../../lib/subscriptionState.js';
 
-export const OWNER_EMAIL = 'alissasmith.apps@gmail.com';
+export const OWNER_EMAIL = SHARED_OWNER_EMAIL;
 
-// Owner access is independent of Stripe billing.
+// Owner access is independent of Stripe billing (owner role or the one
+// designated owner email only).
 export const isOwner = (profile: Profile | null): boolean => {
   if (!profile) return false;
-  return profile.role === 'owner'
-    || profile.email?.toLowerCase() === OWNER_EMAIL
-    || (profile.subscription_tier as string) === 'owner';
+  return isOwnerAccount(profile);
 };
 
-// Never trust a cached tier alone: it can remain Pro after checkout fails
-// or a subscription is canceled. Stripe webhooks synchronize this status.
-const hasValidSubscription = (profile: Profile | null): boolean => {
-  if (!profile?.stripe_subscription_id) return false;
-  return profile.stripe_subscription_status === 'active'
-    || profile.stripe_subscription_status === 'trialing';
+/**
+ * The tier this person can actually use right now. Never trusts the cached
+ * subscription_tier label alone — it must be backed by a current Stripe
+ * subscription (customer id, subscription id, active/trialing status and a
+ * billing period that has not run out). The server applies the same rule.
+ */
+export const getAccessTier = (profile: Profile | null): 'owner' | 'pro' | 'plus' | 'free' => {
+  if (!profile) return 'free';
+  return resolveAccessTier({ profile }) as 'owner' | 'pro' | 'plus' | 'free';
 };
 
 // Premium = unlimited chat for valid Plus/Pro subscriptions or the owner.
-export const hasPremiumAccess = (profile: Profile | null): boolean => {
-  if (!profile) return false;
-  if (isOwner(profile)) return true;
-  return (profile.subscription_tier === 'plus' || profile.subscription_tier === 'pro')
-    && hasValidSubscription(profile);
-};
+export const hasPremiumAccess = (profile: Profile | null): boolean => canUsePremium(getAccessTier(profile));
 
-// Pro-only features, including voice. This changes entitlement checks only,
-// not David's voice, audio settings, or conversation behavior.
-export const hasProAccess = (profile: Profile | null): boolean => {
-  if (!profile) return false;
-  if (isOwner(profile)) return true;
-  return profile.subscription_tier === 'pro' && hasValidSubscription(profile);
-};
+// Pro-only features, including David's voice.
+export const hasProAccess = (profile: Profile | null): boolean => canUsePro(getAccessTier(profile));
 
 export const hasVoiceAccess = hasProAccess;

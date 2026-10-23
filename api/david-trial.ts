@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
+import { ENTITLEMENT_COLUMNS, canUsePremium, canUsePro, resolveAccessTier } from '../lib/subscriptionState.js';
 
 const TEXT_LIMIT = 25;
 const VOICE_SECONDS_LIMIT = 60 * 60;
-const OWNER_EMAIL = 'alissasmith.apps@gmail.com';
 
 const firstConfigured = (...values: Array<string | undefined>) => values.map(v => v?.trim()).find(Boolean) || '';
 
@@ -37,11 +37,12 @@ export default async function handler(req: any, res: any) {
     const { data: { user }, error: userError } = await (auth.auth as any).getUser(token);
     if (userError || !user) return json(res, 401, { code: 'AUTH_REQUIRED', error: 'Your sign-in session expired.' });
 
-    const { data: profile } = await service.from('profiles').select('role, subscription_tier, email').eq('id', user.id).maybeSingle();
-    const tier = profile?.subscription_tier || 'free';
-    const owner = profile?.role === 'owner' || tier === 'owner' || (profile?.email || user.email || '').toLowerCase() === OWNER_EMAIL;
-    const paidText = owner || tier === 'plus' || tier === 'pro';
-    const paidVoice = owner || tier === 'pro';
+    const { data: profile } = await service.from('profiles').select(ENTITLEMENT_COLUMNS).eq('id', user.id).maybeSingle();
+    // Verified against the Stripe subscription fields, not the tier label.
+    const tier = resolveAccessTier({ profile, userEmail: user.email || null });
+    const owner = tier === 'owner';
+    const paidText = canUsePremium(tier);
+    const paidVoice = canUsePro(tier);
 
     const { data: usage, error: usageError } = await service.from('david_intro_trial_usage').select('text_messages_used, voice_seconds_used').eq('user_id', user.id).maybeSingle();
     if (usageError) throw usageError;

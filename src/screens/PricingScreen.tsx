@@ -5,6 +5,7 @@ import { useUser } from '../UserContext';
 import { createCheckoutSession, syncCheckoutSession } from '../services/stripe';
 import { APP_COLORS, APP_FONTS } from '../designSystem';
 import { PLANS } from '../constants';
+import { getAccessTier } from '../utils/tier';
 
 const PLAN_COPY = [
   {
@@ -39,7 +40,7 @@ export default function PricingScreen({ route }: any) {
   const [loadingTier, setLoadingTier] = useState<PaidTier | null>(null);
   const [status, setStatus] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  const currentTier = profile?.subscription_tier || 'free';
+  const currentTier = getAccessTier(profile);
   const currentIndex = useMemo(() => ['free', 'plus', 'pro', 'owner'].indexOf(currentTier), [currentTier]);
 
   useEffect(() => {
