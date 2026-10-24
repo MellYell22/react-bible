@@ -1,30 +1,36 @@
 import { Profile } from '../types';
+import {
+  OWNER_EMAIL as SHARED_OWNER_EMAIL,
+  canUsePremium,
+  canUsePro,
+  isOwnerAccount,
+  resolveAccessTier,
+} from '../../lib/subscriptionState.js';
 
-export const OWNER_EMAIL = 'alissasmith.apps@gmail.com';
+export const OWNER_EMAIL = SHARED_OWNER_EMAIL;
 
-// Owner lives in profiles.role. The database constrains subscription_tier to
-// free | plus | pro, so it can never hold 'owner' — the tier check below is a
-// legacy safety net only, and role is the source of truth.
+// Owner access is independent of Stripe billing (owner role or the one
+// designated owner email only).
 export const isOwner = (profile: Profile | null): boolean => {
   if (!profile) return false;
-  return profile.role === 'owner'
-    || profile.email?.toLowerCase() === OWNER_EMAIL
-    || (profile.subscription_tier as string) === 'owner';
+  return isOwnerAccount(profile);
 };
 
-// Premium = unlimited chat. Both Plus and Pro qualify (and owner).
-export const hasPremiumAccess = (profile: Profile | null): boolean => {
-  if (!profile) return false;
-  if (isOwner(profile)) return true;
-  return profile.subscription_tier === 'plus' || profile.subscription_tier === 'pro';
+/**
+ * The tier this person can actually use right now. Never trusts the cached
+ * subscription_tier label alone — it must be backed by a current Stripe
+ * subscription (customer id, subscription id, active/trialing status and a
+ * billing period that has not run out). The server applies the same rule.
+ */
+export const getAccessTier = (profile: Profile | null): 'owner' | 'pro' | 'plus' | 'free' => {
+  if (!profile) return 'free';
+  return resolveAccessTier({ profile }) as 'owner' | 'pro' | 'plus' | 'free';
 };
 
-// Voice (David's spoken voice) is Pro-only (and owner).
-export const hasProAccess = (profile: Profile | null): boolean => {
-  if (!profile) return false;
-  if (isOwner(profile)) return true;
-  return profile.subscription_tier === 'pro';
-};
+// Premium = unlimited chat for valid Plus/Pro subscriptions or the owner.
+export const hasPremiumAccess = (profile: Profile | null): boolean => canUsePremium(getAccessTier(profile));
 
-// Convenience alias for voice-specific gating; currently equals Pro access.
+// Pro-only features, including David's voice.
+export const hasProAccess = (profile: Profile | null): boolean => canUsePro(getAccessTier(profile));
+
 export const hasVoiceAccess = hasProAccess;

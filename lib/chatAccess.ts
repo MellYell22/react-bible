@@ -1,4 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  ENTITLEMENT_COLUMNS,
+  canUsePremium,
+  canUsePro,
+  resolveAccessTier,
+} from './subscriptionState.js';
 
 /**
  * Server-side entitlement gate for `/api/chat`.
@@ -20,8 +26,6 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export const FREE_DAILY_MESSAGE_LIMIT = 5;
 
-const PREMIUM_TIERS = new Set(['plus', 'pro', 'owner']);
-const OWNER_EMAIL = 'alissasmith.apps@gmail.com';
 const USAGE_TABLE = 'david_conversation_memory';
 
 export type ChatAccessDenialBody = {
@@ -165,7 +169,7 @@ export const checkChatAccess = async (
 
   const { data: profile, error: profileError } = await authClient
     .from('profiles')
-    .select('subscription_tier, role, email')
+    .select(ENTITLEMENT_COLUMNS)
     .eq('id', user.id)
     .maybeSingle();
 
@@ -173,17 +177,17 @@ export const checkChatAccess = async (
     console.warn('[ChatAccess] Profile lookup failed:', profileError.message);
   }
 
-  const tier = profile?.subscription_tier ?? null;
-  const isOwner = profile?.role === 'owner'
-    || tier === 'owner'
-    || (profile?.email || user.email || '').toLowerCase() === OWNER_EMAIL;
+  // Never trust the cached tier label: it must be backed by a current Stripe
+  // subscription. A stale "pro" row is treated as free.
+  const tier = resolveAccessTier({ profile, userEmail: user.email || null });
 
-  if (isOwner || (tier && PREMIUM_TIERS.has(tier))) {
+  // Live voice is a Pro feature. Plus covers unlimited text only. The Voice
+  // screen gates this in the UI; this closes the hole on the server so the
+  // flag cannot be forged.
+  if (options.liveVoice ? canUsePro(tier) : canUsePremium(tier)) {
     return allow('premium', tier, null, null);
   }
 
-  // Live voice is a Pro feature. The Voice screen gates it in the UI; this
-  // closes the matching hole on the server so the flag cannot be forged.
   if (options.liveVoice) {
     return deny(402, {
       error: 'Upgrade required',

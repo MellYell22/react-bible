@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { ENTITLEMENT_COLUMNS, canUsePremium, resolveAccessTier } from '../lib/subscriptionState.js';
 import { DAVID_PERSONA, DAVID_NO_FABRICATION_RULE } from '../src/constants/persona.js';
 import { DAVID_SELF_INTRODUCTION_RULE, normalizeDavidSelfIntroduction } from '../src/utils/davidIdentity.js';
 import { detectConversationOpening } from '../src/utils/conversationOpening.mjs';
@@ -154,14 +155,13 @@ export default async function handler(req: any, res: any) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('subscription_tier, role')
+      .select(ENTITLEMENT_COLUMNS)
       .eq('id', user.id)
       .maybeSingle();
 
-    const isOwner = profile?.role === 'owner' || profile?.subscription_tier === 'owner';
-    const isPremium = isOwner
-      || profile?.subscription_tier === 'plus'
-      || profile?.subscription_tier === 'pro';
+    // Paid access must be backed by a current Stripe subscription, never the
+    // cached tier label alone.
+    const isPremium = canUsePremium(resolveAccessTier({ profile, userEmail: user.email || null }));
 
     if (!isPremium) {
       const serviceClient = getSupabaseServiceClient();

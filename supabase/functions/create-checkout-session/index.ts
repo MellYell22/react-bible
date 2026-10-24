@@ -177,6 +177,7 @@ serve(async (req) => {
               stripe_subscription_id: updated.id,
               stripe_subscription_status: updated.status,
               stripe_price_id: selectedPriceId,
+              stripe_current_period_end: new Date(updated.current_period_end * 1000).toISOString(),
             })
             .eq("id", user.id);
           if (writeError) console.error("[create-checkout-session] Plan switched in Stripe; profile update deferred to webhook:", writeError.message);

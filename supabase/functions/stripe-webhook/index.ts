@@ -236,8 +236,18 @@ Deno.serve(async (req: Request) => {
 
       case "customer.subscription.created":
       case "customer.subscription.updated":
-      case "customer.subscription.deleted":
-        return processSubscription(event.data.object as Stripe.Subscription);
+      case "customer.subscription.deleted": {
+        // Events can arrive late or out of order: always write Stripe's current
+        // state, not the event snapshot.
+        const eventSubscription = event.data.object as Stripe.Subscription;
+        let subscription = eventSubscription;
+        try {
+          subscription = await stripe.subscriptions.retrieve(eventSubscription.id);
+        } catch (error) {
+          console.warn(`[stripe-webhook] Could not refresh ${eventSubscription.id}; using event payload.`, error);
+        }
+        return processSubscription(subscription);
+      }
 
       case "invoice.paid":
       case "invoice.payment_succeeded": {
@@ -248,9 +258,14 @@ Deno.serve(async (req: Request) => {
         return processSubscription(subscription, invoice.customer_email || null);
       }
 
-      case "invoice.payment_failed":
-        console.warn("[stripe-webhook] Payment failed; waiting for subscription status update.");
-        return json({ received: true, processed: true });
+      case "invoice.payment_failed": {
+        // Reconcile now instead of trusting a later event to arrive.
+        const invoice = event.data.object as Stripe.Invoice;
+        const subscriptionId = getId((invoice as any).subscription);
+        if (!subscriptionId) return ignore(`failed invoice ${invoice.id} has no subscription`);
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        return processSubscription(subscription, invoice.customer_email || null);
+      }
 
       default:
         return ignore(`unsupported event ${event.type}`);

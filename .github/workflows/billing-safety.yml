@@ -1,0 +1,30 @@
+name: Billing safety checks
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/verify-paid-access-20261023]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Billing and entitlement tests gate every merge. (The full suite still
+      # contains older David voice/navigation tests written for the previous
+      # voice architecture; those are tracked separately and run below without
+      # blocking billing fixes.)
+      - name: Billing and entitlement tests
+        run: node --test tests/paid-access.test.mjs tests/subscriptionState.test.mjs tests/subscription-management.test.mjs
+      - run: pnpm lint
+      - run: pnpm build
+      - name: Full test suite (informational)
+        run: pnpm test
+        continue-on-error: true

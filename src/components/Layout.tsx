@@ -19,6 +19,7 @@ import {
 import { AUTHOR_CREDIT, APP_NAME } from '../constants';
 import { BibleTranslation } from '../types';
 import TranslationPicker from './TranslationPicker';
+import { hasProAccess } from '../utils/tier';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -52,7 +53,7 @@ const Layout: React.FC<LayoutProps> = ({
   const { width: windowWidth } = useWindowDimensions();
   const isNarrowHeader = windowWidth < 700;
   const isGuest = user?.id === 'guest';
-  const isPro = user?.subscription_tier === 'pro';
+  const isPro = hasProAccess(user as any);
 
   return (
     <View style={styles.safeArea}>
