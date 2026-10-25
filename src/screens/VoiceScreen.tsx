@@ -28,6 +28,8 @@ import { detectMoodKeyFromMessages } from '../utils/davidMoodContext';
 import { getVoiceSessionGreeting } from '../constants/persona';
 import { PLANS } from '../constants';
 
+const VOICE_TRIAL_USED_UP_MESSAGE = 'Your free David voice time is used up. Upgrade to Pro to keep talking.';
+
 const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
 
 // Keep the listener sensitive enough for normal laptop/phone microphones.
@@ -196,6 +198,9 @@ export default function VoiceScreen({ navigation }: any) {
     return email === OWNER_EMAIL.toLowerCase();
   }, [profile, session?.user?.email]);
   const hasVoiceAccess = hasPaidVoiceAccess || (trialVoiceSecondsRemaining !== null && trialVoiceSecondsRemaining > 0);
+  // Free minutes are still being looked up. Until then we cannot tell a trial
+  // user apart from someone who has used everything up.
+  const voiceAccessChecking = !hasPaidVoiceAccess && (userContextLoading || trialUsageLoading);
 
   const getTrialHeaders = async () => {
     const { supabase: sb } = await import('../services/supabase');
@@ -870,6 +875,7 @@ export default function VoiceScreen({ navigation }: any) {
   useEffect(() => {
     if (userContextLoading) return;
     if (hasVoiceAccess) {
+      setError(current => (current === VOICE_TRIAL_USED_UP_MESSAGE ? null : current));
       // This screen is the only place voice mode is ever switched on.
       setVoiceModeActive(true);
       setPhase(current => (current === 'checking' ? 'idle' : current));
@@ -991,7 +997,8 @@ export default function VoiceScreen({ navigation }: any) {
 
   const handleStartConversation = async () => {
     if (elevenLabsConversation.status !== 'disconnected') return;
-    if (!hasVoiceAccess) { setError('Your free David voice time is used up. Upgrade to Pro to keep talking.'); return; }
+    if (voiceAccessChecking) return;
+    if (!hasVoiceAccess) { setError(VOICE_TRIAL_USED_UP_MESSAGE); return; }
 
     const userId = session?.user?.id || profile?.id || 'guest';
 
@@ -1159,7 +1166,7 @@ export default function VoiceScreen({ navigation }: any) {
     phase === 'transcribing' ||
     phase === 'greeting';
   const voiceWaveIsActive = phase === 'starting' || phase === 'listening' || phase === 'speaking' || phase === 'greeting';
-  const startConversationIsEnabled = phase === 'idle' || phase === 'error' || phase === 'ended';
+  const startConversationIsEnabled = !voiceAccessChecking && (phase === 'idle' || phase === 'error' || phase === 'ended');
   const endConversationIsEnabled =
     phase === 'greeting' ||
     phase === 'starting' ||
@@ -1239,8 +1246,25 @@ export default function VoiceScreen({ navigation }: any) {
           </View>
         </View>
 
-        {!hasPaidVoiceAccess && trialVoiceSecondsRemaining !== null && (
-          <Text style={styles.trialVoiceCounter}>{Math.ceil(trialVoiceSecondsRemaining / 60)} free voice minutes left</Text>
+        {!hasPaidVoiceAccess && voiceAccessChecking && (
+          <Text style={styles.trialVoiceCounter}>Checking your free voice minutes…</Text>
+        )}
+        {!hasPaidVoiceAccess && !voiceAccessChecking && trialVoiceSecondsRemaining !== null && (
+          <View style={styles.trialUpgradeRow}>
+            <Text style={styles.trialVoiceCounter}>{Math.ceil(trialVoiceSecondsRemaining / 60)} free voice minutes left</Text>
+            <TouchableOpacity
+              style={[styles.trialUpgradeButton, upgradeLoading && styles.lockUpgradeButtonDisabled]}
+              onPress={handleUpgradeToPro}
+              disabled={upgradeLoading}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`Upgrade to ${PLANS.PRO.name}, ${PLANS.PRO.price} per ${PLANS.PRO.interval}`}
+            >
+              <Text style={styles.trialUpgradeButtonText}>
+                {upgradeLoading ? 'Starting checkout...' : `Upgrade to ${PLANS.PRO.name}`}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
         <View style={styles.conversationControls}>
           <TouchableOpacity
@@ -1338,6 +1362,20 @@ export default function VoiceScreen({ navigation }: any) {
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
+            {error === VOICE_TRIAL_USED_UP_MESSAGE && (
+              <TouchableOpacity
+                style={[styles.lockUpgradeButton, styles.errorUpgradeButton, upgradeLoading && styles.lockUpgradeButtonDisabled]}
+                onPress={handleUpgradeToPro}
+                disabled={upgradeLoading}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Upgrade to ${PLANS.PRO.name}, ${PLANS.PRO.price} per ${PLANS.PRO.interval}`}
+              >
+                <Text style={styles.lockUpgradeButtonText}>
+                  {upgradeLoading ? 'Starting checkout...' : `Get ${PLANS.PRO.name} — ${PLANS.PRO.price}/${PLANS.PRO.interval}`}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -1549,6 +1587,17 @@ const styles = StyleSheet.create({
     boxShadow: '0 4px 8px rgba(212, 175, 55, 0.35)',
   },
   trialVoiceCounter: { color: '#c8b46b', fontSize: 10, textAlign: 'center', marginBottom: 8 },
+  trialUpgradeRow: { alignItems: 'center', marginBottom: 8 },
+  trialUpgradeButton: {
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#d4af37',
+    backgroundColor: 'rgba(212, 175, 55, 0.12)',
+  },
+  trialUpgradeButtonText: { color: '#d4af37', fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  errorUpgradeButton: { marginTop: 12, alignSelf: 'center' },
   conversationControls: {
     width: '100%',
     maxWidth: 620,

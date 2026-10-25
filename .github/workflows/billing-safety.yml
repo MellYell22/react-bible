@@ -22,7 +22,7 @@ jobs:
       # voice architecture; those are tracked separately and run below without
       # blocking billing fixes.)
       - name: Billing and entitlement tests
-        run: node --test tests/paid-access.test.mjs tests/subscriptionState.test.mjs tests/subscription-management.test.mjs
+        run: node --test tests/paid-access.test.mjs tests/voice-upgrade.test.mjs tests/subscriptionState.test.mjs tests/subscription-management.test.mjs
       - run: pnpm lint
       - run: pnpm build
       - name: Full test suite (informational)
