@@ -104,13 +104,8 @@ serve(async (req) => {
     if (!profile) return json({ error: "Your account profile is still being created. Please try again in a moment." }, 409);
 
     const isOwner = user.email?.toLowerCase() === OWNER_EMAIL || profile.subscription_tier === "owner";
-    const alreadyOnThisPlan = profile.subscription_tier === requestedPlan
-      && PAID_STATUSES.has(profile.stripe_subscription_status);
     if (isOwner) {
       return json({ error: "This account already has full access." }, 409);
-    }
-    if (alreadyOnThisPlan) {
-      return json({ error: `This account is already subscribed to ${getPlanLabel(requestedPlan)}.` }, 409);
     }
 
     const stripe = new Stripe(stripeSecretKey, {
@@ -155,6 +150,15 @@ serve(async (req) => {
       const { data: subs } = await stripe.subscriptions.list({ customer: existingCustomerId, status: "all", limit: 20 });
       const current = subs.find((s) => ["active", "trialing", "past_due"].includes(s.status)
         && s.items.data.some((item) => ourPrices.has(item.price.id)));
+      if (current?.status === "past_due") {
+        // Keep the existing subscription: a second checkout could double-bill.
+        // Let Stripe collect the outstanding invoice or update the payment method.
+        const portal = await stripe.billingPortal.sessions.create({
+          customer: existingCustomerId,
+          return_url: `${appOrigin}/?showPricing=true&billingRecovery=true`,
+        });
+        return json({ url: portal.url, recovery: true });
+      }
       if (current) {
         const item = current.items.data.find((i) => ourPrices.has(i.price.id))!;
         if (item.price.id === selectedPriceId) {
