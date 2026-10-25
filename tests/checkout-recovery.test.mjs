@@ -14,12 +14,13 @@ const source = readFileSync(new URL('../supabase/functions/create-checkout-sessi
 
 function fixture({ subscriptions = [], customerId = 'cus_own' } = {}) {
   let handler;
-  const calls = { portal: 0, checkout: 0, update: 0 };
+  const calls = { portal: 0, checkout: 0, update: 0, cancel: [] };
   const stripe = {
     prices: { retrieve: async (id) => ({ id, active: true, type: 'recurring', recurring: { interval: 'month' }, livemode: false, unit_amount: id === PRO ? 1299 : 999, currency: 'usd' }) },
     customers: { retrieve: async () => ({ id: customerId, livemode: false }) },
     subscriptions: {
       list: async () => ({ data: subscriptions }),
+      cancel: async (id) => { calls.cancel.push(id); return { id, status: 'canceled' }; },
       update: async (id, patch) => { calls.update++; return { id, status: 'active', current_period_end: 1900000000, ...patch }; },
     },
     billingPortal: { sessions: { create: async ({ customer }) => { calls.portal++; assert.equal(customer, customerId); return { id: 'bps_1', url: 'https://billing.stripe.test/portal' }; } } },
@@ -64,11 +65,20 @@ test('a past_due subscriber picking the other plan is also sent to update their 
   assert.equal(app.calls.checkout, 0);
 });
 
-test('an unpaid subscriber is sent to update their card instead of a second checkout', async () => {
+test('an unpaid subscriber (Stripe stopped retrying) gets the dead subscription canceled and a fresh checkout', async () => {
   const app = fixture({ subscriptions: [sub('unpaid')] });
   const { body } = await app.request('pro');
-  assert.equal(body.recoverPayment, true);
-  assert.equal(app.calls.checkout, 0);
+  assert.deepEqual(app.calls.cancel, ['sub_old'], 'the stuck subscription is canceled so there are never two');
+  assert.equal(app.calls.portal, 0, 'a new card alone would not pay an unpaid invoice');
+  assert.equal(app.calls.update, 0);
+  assert.equal(app.calls.checkout, 1);
+  assert.equal(body.url, 'https://checkout.stripe.test/new');
+});
+
+test('a past_due subscriber is never canceled', async () => {
+  const app = fixture({ subscriptions: [sub('past_due')] });
+  await app.request('pro');
+  assert.deepEqual(app.calls.cancel, []);
 });
 
 test('an active Pro subscriber is still told they already have Pro', async () => {

@@ -157,11 +157,20 @@ serve(async (req) => {
         && s.items.data.some((item) => ourPrices.has(item.price.id)));
 
       // A failed card leaves the subscription past_due/unpaid and the app treats
-      // the person as free. They must be able to pay again: send them to Stripe's
-      // portal to update their card, which retries the open invoice and, once it
-      // is paid, the webhook restores their plan. Never answer "already
-      // subscribed", and never start a second subscription alongside the unpaid one.
-      if (current && !PAID_STATUSES.has(current.status)) {
+      // the person as free. They must be able to pay again — never answer
+      // "already subscribed", and never run two subscriptions side by side.
+      //
+      // unpaid: Stripe has stopped retrying, so a new card alone would not pay
+      // anything. Cancel the dead subscription and fall through to a normal
+      // fresh checkout, which charges immediately and saves the new card.
+      if (current && current.status === "unpaid") {
+        await stripe.subscriptions.cancel(current.id);
+        console.log(`[create-checkout-session] Canceled unpaid subscription ${current.id} for user ${user.id}; starting a fresh checkout.`);
+      }
+
+      // past_due: Stripe is still retrying the invoice. Send them to update their
+      // card; the next retry uses it and the webhook restores their plan.
+      if (current && current.status === "past_due") {
         const portalSession = await stripe.billingPortal.sessions.create({
           customer: existingCustomerId,
           return_url: `${appOrigin}/?recovered=true&plan=${requestedPlan}`,
@@ -171,7 +180,7 @@ serve(async (req) => {
         return json({ url: portalSession.url, recoverPayment: true });
       }
 
-      if (current) {
+      if (current && PAID_STATUSES.has(current.status)) {
         const item = current.items.data.find((i) => ourPrices.has(i.price.id))!;
         if (item.price.id === selectedPriceId) {
           return json({ error: `This account is already subscribed to ${getPlanLabel(requestedPlan)}.` }, 409);
