@@ -153,9 +153,34 @@ serve(async (req) => {
     if (existingCustomerId) {
       const ourPrices = new Set(Object.keys(PRICE_ENV_BY_PLAN).map((p) => resolvePriceIdForPlan(p as CheckoutPlan)).filter(Boolean));
       const { data: subs } = await stripe.subscriptions.list({ customer: existingCustomerId, status: "all", limit: 20 });
-      const current = subs.find((s) => ["active", "trialing", "past_due"].includes(s.status)
+      const current = subs.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)
         && s.items.data.some((item) => ourPrices.has(item.price.id)));
-      if (current) {
+
+      // A failed card leaves the subscription past_due/unpaid and the app treats
+      // the person as free. They must be able to pay again — never answer
+      // "already subscribed", and never run two subscriptions side by side.
+      //
+      // unpaid: Stripe has stopped retrying, so a new card alone would not pay
+      // anything. Cancel the dead subscription and fall through to a normal
+      // fresh checkout, which charges immediately and saves the new card.
+      if (current && current.status === "unpaid") {
+        await stripe.subscriptions.cancel(current.id);
+        console.log(`[create-checkout-session] Canceled unpaid subscription ${current.id} for user ${user.id}; starting a fresh checkout.`);
+      }
+
+      // past_due: Stripe is still retrying the invoice. Send them to update their
+      // card; the next retry uses it and the webhook restores their plan.
+      if (current && current.status === "past_due") {
+        const portalSession = await stripe.billingPortal.sessions.create({
+          customer: existingCustomerId,
+          return_url: `${appOrigin}/?recovered=true&plan=${requestedPlan}`,
+        });
+        if (!portalSession.url) throw new Error(`Stripe returned portal session ${portalSession.id} without a URL.`);
+        console.log(`[create-checkout-session] Sent user ${user.id} to update payment for ${current.status} subscription ${current.id}.`);
+        return json({ url: portalSession.url, recoverPayment: true });
+      }
+
+      if (current && PAID_STATUSES.has(current.status)) {
         const item = current.items.data.find((i) => ourPrices.has(i.price.id))!;
         if (item.price.id === selectedPriceId) {
           return json({ error: `This account is already subscribed to ${getPlanLabel(requestedPlan)}.` }, 409);
