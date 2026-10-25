@@ -153,8 +153,24 @@ serve(async (req) => {
     if (existingCustomerId) {
       const ourPrices = new Set(Object.keys(PRICE_ENV_BY_PLAN).map((p) => resolvePriceIdForPlan(p as CheckoutPlan)).filter(Boolean));
       const { data: subs } = await stripe.subscriptions.list({ customer: existingCustomerId, status: "all", limit: 20 });
-      const current = subs.find((s) => ["active", "trialing", "past_due"].includes(s.status)
+      const current = subs.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)
         && s.items.data.some((item) => ourPrices.has(item.price.id)));
+
+      // A failed card leaves the subscription past_due/unpaid and the app treats
+      // the person as free. They must be able to pay again: send them to Stripe's
+      // portal to update their card, which retries the open invoice and, once it
+      // is paid, the webhook restores their plan. Never answer "already
+      // subscribed", and never start a second subscription alongside the unpaid one.
+      if (current && !PAID_STATUSES.has(current.status)) {
+        const portalSession = await stripe.billingPortal.sessions.create({
+          customer: existingCustomerId,
+          return_url: `${appOrigin}/?recovered=true&plan=${requestedPlan}`,
+        });
+        if (!portalSession.url) throw new Error(`Stripe returned portal session ${portalSession.id} without a URL.`);
+        console.log(`[create-checkout-session] Sent user ${user.id} to update payment for ${current.status} subscription ${current.id}.`);
+        return json({ url: portalSession.url, recoverPayment: true });
+      }
+
       if (current) {
         const item = current.items.data.find((i) => ourPrices.has(i.price.id))!;
         if (item.price.id === selectedPriceId) {
