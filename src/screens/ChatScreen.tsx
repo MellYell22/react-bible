@@ -51,6 +51,33 @@ export default function ChatScreen({ navigation, route }: any) {
 
   const isPaid = hasPremiumAccess(profile);
 
+  // The remaining free messages used to arrive only in the reply to a sent
+  // message, so the count was invisible until you had already spent one.
+  // Read it when the chat opens so it is on screen from the start.
+  useEffect(() => {
+    if (isPaid || isGuest) { setTrialMessagesRemaining(null); return; }
+    const token = session?.access_token;
+    if (!token) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/david-trial', {
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (cancelled || !response.ok) return;
+        const remaining = data?.text?.remaining;
+        if (typeof remaining === 'number') setTrialMessagesRemaining(remaining);
+      } catch (trialError) {
+        // Not worth interrupting the chat over; the count still arrives with
+        // the next reply.
+        console.error('[David Chat] Could not read the free message count:', trialError);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isPaid, isGuest, session?.access_token]);
+
   const submitMessage = async (rawText: string, baseMessages: ChatMessage[] = messages, clearComposer = true) => {
     const trimmedInput = rawText.trim();
     if (!trimmedInput || loading) return;
@@ -263,9 +290,18 @@ export default function ChatScreen({ navigation, route }: any) {
               <View style={styles.avatar}><UserCircle2 size={27} color={APP_COLORS.gold} /></View>
               <View><Text style={styles.davidName}>David</Text><Text style={styles.davidSubtitle}>A calm spiritual companion</Text></View>
             </View>
-            <TouchableOpacity onPress={() => navigation.navigate('Voice')} accessibilityRole="button" accessibilityLabel="Open David voice">
-              <MoreHorizontal size={20} color={APP_COLORS.gold} />
-            </TouchableOpacity>
+            <View style={styles.headerRight}>
+              {!isPaid && trialMessagesRemaining !== null && (
+                <Text style={styles.trialCounter}>
+                  {trialMessagesRemaining === 1
+                    ? '1 free message left'
+                    : `${trialMessagesRemaining} free messages left`}
+                </Text>
+              )}
+              <TouchableOpacity onPress={() => navigation.navigate('Voice')} accessibilityRole="button" accessibilityLabel="Open David voice">
+                <MoreHorizontal size={20} color={APP_COLORS.gold} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {messages.length === 0 ? (
@@ -293,9 +329,6 @@ export default function ChatScreen({ navigation, route }: any) {
             </ScrollView>
           )}
 
-          {!isPaid && trialMessagesRemaining !== null && (
-            <Text style={styles.trialCounter}>{trialMessagesRemaining} free David messages left</Text>
-          )}
           <View style={[styles.composerRow, !compact && styles.centeredConversation]}>
             <TextInput
               style={styles.composer}
@@ -353,14 +386,30 @@ const styles = StyleSheet.create({
   emptyText: { color: APP_COLORS.cream, fontFamily: APP_FONTS.sans, fontSize: 10, lineHeight: 16, textAlign: 'center', marginTop: 7 },
   messages: { flex: 1, minHeight: 0 },
   messagesContent: { padding: 18 },
-  centeredConversation: { width: '100%', maxWidth: 760, alignSelf: 'center' },
+  // Sits against the right edge rather than floating in the middle of the
+  // panel, and keeps a readable line length instead of running the full
+  // width of the window.
+  centeredConversation: { width: '100%', maxWidth: 860, alignSelf: 'flex-end' },
   messageRow: { width: '100%', alignSelf: 'flex-start', marginBottom: 18 },
   userMessageRow: { alignSelf: 'flex-start', alignItems: 'stretch' },
-  messageAuthor: { color: APP_COLORS.gold, fontFamily: APP_FONTS.serif, fontSize: 8, fontWeight: '700', letterSpacing: 1, marginBottom: 5 },
-  messageText: { color: APP_COLORS.cream, fontFamily: APP_FONTS.display, fontSize: 15, lineHeight: 23 },
+  messageAuthor: { color: APP_COLORS.gold, fontFamily: APP_FONTS.serif, fontSize: 9, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
+  messageText: { color: APP_COLORS.cream, fontFamily: APP_FONTS.display, fontSize: 17, lineHeight: 27 },
   userMessageText: { color: APP_COLORS.goldSoft, textAlign: 'left' },
   messageActions: { flexDirection: 'row', gap: 10, marginTop: 7, alignItems: 'center' },
-  trialCounter: { color: APP_COLORS.muted, fontFamily: APP_FONTS.sans, fontSize: 9, textAlign: 'center', paddingVertical: 5 },
+  trialCounter: {
+    color: APP_COLORS.gold,
+    fontFamily: APP_FONTS.sans,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: APP_COLORS.gold,
+    borderRadius: 999,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(212, 175, 55, 0.12)',
+  },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   composerRow: { minHeight: 60, borderTopWidth: 1, borderTopColor: APP_COLORS.borderSoft, flexDirection: 'row', alignItems: 'stretch', padding: 10 },
   composer: { flex: 1, borderWidth: 1, borderColor: APP_COLORS.border, backgroundColor: APP_COLORS.navy, color: APP_COLORS.cream, fontFamily: APP_FONTS.sans, fontSize: 11, paddingHorizontal: 12, paddingVertical: 10, maxHeight: 100 },
   sendButton: { width: 48, marginLeft: 10, backgroundColor: APP_COLORS.gold, alignItems: 'center', justifyContent: 'center' },
