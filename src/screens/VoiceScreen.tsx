@@ -145,7 +145,15 @@ const isMeaningfulUserText = (value: string, source: 'voice' | 'typed' = 'voice'
 };
 
 export default function VoiceScreen({ navigation }: any) {
-  const elevenLabsConversation = useConversation();
+  // Set below, once the handler it needs exists. The live conversation runs
+  // inside the ElevenLabs agent, so watching its messages is the only place
+  // David's spoken replies can actually be seen and counted.
+  const onAgentMessageRef = useRef<(payload: any) => void>(() => {});
+  const onAgentModeChangeRef = useRef<(prop: { mode: string }) => void>(() => {});
+  const elevenLabsConversation = useConversation({
+    onMessage: (payload: any) => onAgentMessageRef.current(payload),
+    onModeChange: (prop: any) => onAgentModeChangeRef.current(prop),
+  });
   const { profile, session, loading: userContextLoading } = useUser();
   const isGuest = session?.user?.id === 'guest' || profile?.id === 'guest';
 
@@ -158,6 +166,17 @@ export default function VoiceScreen({ navigation }: any) {
   const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [trialVoiceRepliesRemaining, setTrialVoiceRepliesRemaining] = useState<number | null>(null);
   const [trialUsageLoading, setTrialUsageLoading] = useState(true);
+  // David's opening greeting is free, so only replies that answer something
+  // the person actually said are counted.
+  const userHasSpokenRef = useRef(false);
+  // The agent streams a reply in parts that share one response_id; each
+  // reply must be charged once, not once per fragment.
+  const countedReplyIdsRef = useRef<Set<string>>(new Set());
+  const trialSpendChainRef = useRef<Promise<void>>(Promise.resolve());
+  // The last free reply is already being spoken when it is charged. Cutting
+  // the session off right then would clip David mid-sentence, so the wall
+  // waits here until he has finished saying it.
+  const paywallPendingRef = useRef(false);
 
   const phaseRef = useRef<ScreenPhase>('checking');
   const messagesRef = useRef<ChatTurn[]>([]);
@@ -1038,6 +1057,12 @@ export default function VoiceScreen({ navigation }: any) {
         await navigator.mediaDevices.getUserMedia({ audio: true });
       }
 
+      // A fresh conversation: the greeting is free again, and reply ids from
+      // the last session must not suppress counting in this one.
+      userHasSpokenRef.current = false;
+      countedReplyIdsRef.current = new Set();
+      paywallPendingRef.current = false;
+
       await elevenLabsConversation.startSession({
         agentId: 'agent_1901m3h52nn7e5xtyze0e3rkb6q5',
         userId,
@@ -1052,6 +1077,85 @@ export default function VoiceScreen({ navigation }: any) {
       setError(err?.message || 'David could not start the voice conversation.');
       setPhase('error');
     }
+  };
+
+  /**
+   * Charges one spoken reply against the free trial and reports what is left.
+   * Returns false when the trial is now spent and the conversation must stop.
+   *
+   * A failure here is deliberately not a lockout: the person keeps talking.
+   * Cutting someone off because the network blipped is worse than letting a
+   * reply through, and the count is re-read whenever the screen reloads.
+   */
+  const spendOneFreeReply = async (): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/david-trial', {
+        method: 'POST',
+        headers: await getTrialHeaders(),
+        body: JSON.stringify({}),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not record the reply.');
+
+      if (data?.voice?.paid) return true;
+
+      const remaining = Number(data?.voice?.remaining ?? 0);
+      setTrialVoiceRepliesRemaining(remaining);
+      return remaining > 0;
+    } catch (spendError) {
+      console.error('[David Voice] Could not record a free reply:', spendError);
+      return true;
+    }
+  };
+
+  /**
+   * Watches the live agent conversation. David's replies are what the trial
+   * is counted in, and they only exist inside this stream — the app's own
+   * chat endpoint is never called during a spoken conversation.
+   */
+  const handleAgentMessage = (payload: any) => {
+    const role = payload?.source ?? payload?.role;
+
+    if (role === 'user') {
+      userHasSpokenRef.current = true;
+      return;
+    }
+
+    if (role !== 'ai') return;
+    if (hasPaidVoiceAccess) return;
+    // The opening greeting is on the house.
+    if (!userHasSpokenRef.current) return;
+
+    // One charge per reply, however many streamed parts it arrives in.
+    const replyId = String(payload?.response_id ?? payload?.event_id ?? '');
+    if (!replyId || countedReplyIdsRef.current.has(replyId)) return;
+    countedReplyIdsRef.current.add(replyId);
+
+    // Serialise the charges so replies arriving back to back cannot race.
+    trialSpendChainRef.current = trialSpendChainRef.current.then(async () => {
+      const mayContinue = await spendOneFreeReply();
+      if (mayContinue || !mountedRef.current) return;
+
+      // That was the last free reply, and David is still saying it. Queue the
+      // wall; handleAgentModeChange closes the session once he stops talking.
+      paywallPendingRef.current = true;
+    });
+  };
+
+  /**
+   * David has stopped speaking. If the free trial ran out during that reply,
+   * this is the moment to close the conversation and show the upgrade wall —
+   * he gets to finish his sentence first.
+   */
+  const handleAgentModeChange = ({ mode }: { mode: string }) => {
+    if (mode === 'speaking') return;
+    if (!paywallPendingRef.current) return;
+    paywallPendingRef.current = false;
+
+    setTrialVoiceRepliesRemaining(0);
+    setError(VOICE_TRIAL_USED_UP_MESSAGE);
+    setPhase('ended');
+    void endVoiceSessionForPaywall();
   };
 
   /**
@@ -1074,6 +1178,11 @@ export default function VoiceScreen({ navigation }: any) {
       console.error('[David Voice] Could not close the voice session at the paywall:', err);
     }
   };
+
+  // Published after every dependency above exists, so the agent's events
+  // always reach the current handlers. Without this the counter never runs.
+  onAgentMessageRef.current = handleAgentMessage;
+  onAgentModeChangeRef.current = handleAgentModeChange;
 
   const handleEndConversation = async () => {
     if (elevenLabsConversation.status === 'disconnected') return;

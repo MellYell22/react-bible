@@ -18,13 +18,68 @@ test('the free voice trial is five spoken exchanges', () => {
   assert.match(migration, /v_limit constant integer := 5;/);
 });
 
-test('the trial is spent on the server, never in the browser', () => {
+test('the trial count is spent in the database, never kept in the browser', () => {
   assert.match(gate, /consume_david_intro_voice_message/);
-  const branch = gate.slice(gate.indexOf('if (options.liveVoice) {'));
-  assert.match(branch.slice(0, 1600), /consumeVoiceTrialMessage\(usageClient, user\.id\)/);
-  // The screen may read what is left, but must never write it.
-  assert.doesNotMatch(source, /method: 'POST'[^\n]*david-trial/);
+  assert.match(trialApi, /consume_david_intro_voice_message/);
   assert.doesNotMatch(source, /voiceSeconds/);
+});
+
+// The spoken conversation runs inside the ElevenLabs agent. Its replies never
+// reach /api/chat, so a counter that only watches that endpoint counts
+// nothing and David never stops — which is exactly what shipped once.
+test('David\'s spoken replies are counted from the live agent conversation', () => {
+  assert.match(source, /useConversation\(\{[\s\S]*?onMessage:/);
+  assert.match(source, /onAgentMessageRef\.current = handleAgentMessage;/);
+  const handler = source.slice(source.indexOf('const handleAgentMessage'));
+  const body = handler.slice(0, handler.indexOf('const handleAgentModeChange'));
+  assert.match(body, /role !== 'ai'/);
+  assert.match(body, /spendOneFreeReply\(\)/);
+});
+
+test('the opening greeting is free', () => {
+  const handler = source.slice(source.indexOf('const handleAgentMessage'));
+  assert.match(handler.slice(0, 1200), /if \(!userHasSpokenRef\.current\) return;/);
+  assert.match(source, /userHasSpokenRef\.current = true;/);
+});
+
+test('a reply streamed in parts is charged once, not once per fragment', () => {
+  const handler = source.slice(source.indexOf('const handleAgentMessage'));
+  assert.match(handler.slice(0, 1200), /countedReplyIdsRef\.current\.has\(replyId\)/);
+  assert.match(handler.slice(0, 1200), /countedReplyIdsRef\.current\.add\(replyId\)/);
+  assert.match(handler.slice(0, 1200), /response_id/);
+});
+
+test('a new conversation starts the greeting and reply ids fresh', () => {
+  const start = source.slice(source.indexOf('const handleStartConversation'));
+  assert.match(start.slice(0, 1600), /userHasSpokenRef\.current = false;/);
+  assert.match(start.slice(0, 1600), /countedReplyIdsRef\.current = new Set\(\);/);
+  assert.match(start.slice(0, 1600), /paywallPendingRef\.current = false;/);
+});
+
+test('David finishes his last sentence before the wall appears', () => {
+  // The charge happens while he is still speaking, so the cut must wait for
+  // the agent to stop rather than firing inside the message handler.
+  const spend = source.slice(source.indexOf('const handleAgentMessage'));
+  const spendBody = spend.slice(0, spend.indexOf('const handleAgentModeChange'));
+  assert.match(spendBody, /paywallPendingRef\.current = true;/);
+  assert.doesNotMatch(spendBody, /endVoiceSessionForPaywall/);
+
+  const mode = source.slice(source.indexOf('const handleAgentModeChange'));
+  assert.match(mode.slice(0, 700), /if \(mode === 'speaking'\) return;/);
+  assert.match(mode.slice(0, 700), /endVoiceSessionForPaywall\(\)/);
+  assert.match(source, /onAgentModeChangeRef\.current = handleAgentModeChange;/);
+});
+
+test('a failed charge never strands someone mid-conversation', () => {
+  const spend = source.slice(source.indexOf('const spendOneFreeReply'));
+  const failure = spend.slice(spend.indexOf('catch'), spend.indexOf('const handleAgentMessage'));
+  assert.match(failure, /return true;/);
+});
+
+test('paid voice is never charged against the trial', () => {
+  const handler = source.slice(source.indexOf('const handleAgentMessage'));
+  assert.match(handler.slice(0, 1200), /if \(hasPaidVoiceAccess\) return;/);
+  assert.match(trialApi, /req\.method === 'POST' && !paidVoice/);
 });
 
 test('the database decrements under a row lock so the last reply cannot double-spend', () => {
@@ -121,11 +176,14 @@ test('the screen counts replies, never minutes', () => {
   assert.match(source, /free replies left/);
 });
 
-test('the trial endpoint reports replies left and is read-only', () => {
+test('the trial endpoint reports replies left and spends them one at a time', () => {
   assert.match(trialApi, /FREE_VOICE_TRIAL_MESSAGES/);
   assert.match(trialApi, /voice_messages_used/);
-  assert.match(trialApi, /req\.method !== 'GET'/);
+  // GET reports, POST spends, nothing else is accepted.
+  assert.match(trialApi, /req\.method !== 'GET' && req\.method !== 'POST'/);
+  // The old seconds-based meter must stay gone.
   assert.doesNotMatch(trialApi, /consume_david_intro_voice_seconds/);
+  assert.doesNotMatch(trialApi, /voice_seconds_used/);
 });
 
 test('free text messages are untouched by the voice change', () => {

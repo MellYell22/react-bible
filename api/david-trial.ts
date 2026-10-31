@@ -26,9 +26,15 @@ const clients = (token: string) => {
 };
 
 export default async function handler(req: any, res: any) {
-  // Read-only. The voice trial is spent server-side in lib/chatAccess.ts as
-  // each spoken turn happens, so there is nothing for a client to post here.
-  if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+  // GET reports what is left. POST spends one spoken reply.
+  //
+  // The live voice conversation runs inside the ElevenLabs agent, so David's
+  // replies never pass through this app's own chat endpoint and cannot be
+  // metered there. The Voice screen watches the agent's replies and posts
+  // here as each one lands. The count itself lives in the database and is
+  // decremented under a row lock, so it survives reloads, new sessions and
+  // other devices, and cannot be reset by clearing site data.
+  if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
 
   const token = getBearerToken(req);
@@ -46,6 +52,29 @@ export default async function handler(req: any, res: any) {
     const paidText = canUsePremium(tier);
     const paidVoice = canUsePro(tier);
 
+    // Spend one spoken reply. Paid voice is never metered.
+    if (req.method === 'POST' && !paidVoice) {
+      const { data: rows, error: consumeError } = await service.rpc(
+        'consume_david_intro_voice_message',
+        { p_user_id: user.id },
+      );
+      if (consumeError) throw consumeError;
+      const row: any = Array.isArray(rows) ? rows[0] : rows;
+      const remaining = Number(row?.voice_messages_remaining ?? 0);
+      return json(res, 200, {
+        tier,
+        owner,
+        voice: {
+          paid: false,
+          limit: FREE_VOICE_TRIAL_MESSAGES,
+          used: Number(row?.voice_messages_used ?? FREE_VOICE_TRIAL_MESSAGES),
+          remaining,
+          // False once the trial is gone: the caller must end the conversation.
+          allowed: Boolean(row?.allowed),
+        },
+      });
+    }
+
     const { data: usage, error: usageError } = await service.from('david_intro_trial_usage').select('text_messages_used, voice_messages_used').eq('user_id', user.id).maybeSingle();
     if (usageError) throw usageError;
     const textUsed = Number(usage?.text_messages_used || 0);
@@ -55,7 +84,7 @@ export default async function handler(req: any, res: any) {
       tier,
       owner,
       text: { paid: paidText, limit: TEXT_LIMIT, used: textUsed, remaining: paidText ? null : Math.max(0, TEXT_LIMIT - textUsed) },
-      // Spoken exchanges, not minutes. Spent in lib/chatAccess.ts per turn.
+      // Spoken exchanges, not minutes. Spent one at a time by POST above.
       voice: {
         paid: paidVoice,
         limit: FREE_VOICE_TRIAL_MESSAGES,
