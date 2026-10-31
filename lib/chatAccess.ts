@@ -12,9 +12,9 @@ import {
  * The app's own UI only reaches this endpoint from VoiceScreen, always with
  * `liveVoice: true` — text chat goes through the `david-chat` Supabase edge
  * function instead, which has its own separate limit in api/david-chat.ts.
- * Live voice is Pro-only: there is no free voice trial, so a `liveVoice`
- * request is resolved by the premium check or the Pro-only denial and never
- * reaches the `under-limit` / `denied` text counting path below.
+ * A `liveVoice` request is resolved by the premium check, then by the free
+ * voice trial below — a fixed number of spoken exchanges per account, ever —
+ * and so never reaches the `under-limit` / `denied` text counting path.
  *
  * It stays in place anyway. `/api/chat` is a public HTTP endpoint — anyone
  * can POST to it directly with `liveVoice: false` or omitted, bypassing the
@@ -26,14 +26,26 @@ import {
 
 export const FREE_DAILY_MESSAGE_LIMIT = 5;
 
+/**
+ * Spoken exchanges every non-Pro account gets with David, once, for the life
+ * of the account — not per day. David's greeting is free; this counts the
+ * replies he gives back. The same number is baked into
+ * `consume_david_intro_voice_message` in the database; both must move
+ * together.
+ */
+export const FREE_VOICE_TRIAL_MESSAGES = 5;
+
 const USAGE_TABLE = 'david_conversation_memory';
+const VOICE_TRIAL_RPC = 'consume_david_intro_voice_message';
 
 export type ChatAccessDenialBody = {
   error: string;
   message: string;
+  code?: string;
   limitReached?: boolean;
   limit?: number;
   used?: number;
+  remaining?: number;
   tier?: string | null;
 };
 
@@ -44,7 +56,7 @@ export type ChatAccessDenialBody = {
  */
 export type ChatAccessResult = {
   allowed: boolean;
-  reason: 'premium' | 'under-limit' | 'unidentified' | 'billing-not-configured' | 'denied';
+  reason: 'premium' | 'voice-trial' | 'under-limit' | 'unidentified' | 'billing-not-configured' | 'denied';
   tier: string | null;
   used: number | null;
   limit: number | null;
@@ -109,6 +121,35 @@ const countTodaysMessages = async (
     return null;
   }
   return count ?? 0;
+};
+
+/**
+ * Spends one exchange of the free voice trial. The count lives in the
+ * database and is decremented there under a row lock, so two turns racing
+ * each other can never both take the last one.
+ *
+ * Returns how many are left, or null when the trial could not be metered at
+ * all — the caller decides what to do about that.
+ */
+const consumeVoiceTrialMessage = async (
+  client: SupabaseClient,
+  userId: string,
+): Promise<{ allowed: boolean; used: number; remaining: number } | null> => {
+  const { data, error } = await (client as any).rpc(VOICE_TRIAL_RPC, { p_user_id: userId });
+
+  if (error) {
+    console.warn('[ChatAccess] Voice trial consume failed:', error.message);
+    return null;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return null;
+
+  return {
+    allowed: Boolean(row.allowed),
+    used: Number(row.voice_messages_used ?? 0),
+    remaining: Number(row.voice_messages_remaining ?? 0),
+  };
 };
 
 const allow = (
@@ -188,23 +229,55 @@ export const checkChatAccess = async (
     return allow('premium', tier, null, null);
   }
 
-  // Live voice is Pro-only, with no free trial. The Voice screen shows the
-  // same Pro wall, so a non-Pro account never gets as far as a voice turn.
-  if (options.liveVoice) {
-    return deny(402, {
-      error: 'Upgrade required',
-      message: "David's spoken voice is part of David's Voice Pro.",
-      limitReached: true,
-      tier,
-    });
-  }
-
   const serviceKey = getServiceKey();
   const usageClient = serviceKey
     ? createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
     : authClient;
+
+  if (options.liveVoice) {
+    // Every non-Pro account gets a short free run of spoken exchanges, once.
+    // Spending it here — not in the browser — is what makes it real: the
+    // count cannot be forged, replayed, or reset by clearing site data.
+    if (!serviceKey) {
+      // Without the service key the trial cannot be metered, and voice costs
+      // real money per turn. Refuse rather than hand out an unlimited trial.
+      console.error('[ChatAccess] Voice trial metering is not configured.');
+      return deny(503, {
+        error: 'Voice unavailable',
+        message: 'David\'s voice is temporarily unavailable. Please try again shortly.',
+        code: 'VOICE_TRIAL_METER_UNAVAILABLE',
+        tier,
+      });
+    }
+
+    const trial = await consumeVoiceTrialMessage(usageClient, user.id);
+
+    if (!trial) {
+      return deny(503, {
+        error: 'Voice unavailable',
+        message: 'David\'s voice is temporarily unavailable. Please try again shortly.',
+        code: 'VOICE_TRIAL_METER_UNAVAILABLE',
+        tier,
+      });
+    }
+
+    if (!trial.allowed) {
+      return deny(402, {
+        error: 'Upgrade required',
+        message: "That's the end of your free time with David's voice. Upgrade to Pro to keep talking.",
+        code: 'VOICE_TRIAL_EXHAUSTED',
+        limitReached: true,
+        limit: FREE_VOICE_TRIAL_MESSAGES,
+        used: trial.used,
+        remaining: 0,
+        tier,
+      });
+    }
+
+    return allow('voice-trial', tier, trial.used, FREE_VOICE_TRIAL_MESSAGES);
+  }
 
   const used = await countTodaysMessages(usageClient, user.id);
 

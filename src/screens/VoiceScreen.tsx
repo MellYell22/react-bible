@@ -15,6 +15,7 @@ import { useConversation } from '@elevenlabs/react';
 import {
   generateSpeech,
   getDavidVoiceResponse,
+  isChatLimitReachedError,
   transcribeAudio,
   setVoiceModeActive,
   SPEECH_VOICE_MODE,
@@ -28,7 +29,7 @@ import { detectMoodKeyFromMessages } from '../utils/davidMoodContext';
 import { getVoiceSessionGreeting } from '../constants/persona';
 import { PLANS } from '../constants';
 
-const VOICE_PRO_REQUIRED_MESSAGE = "David's spoken voice is part of David's Voice Pro. Upgrade to start talking.";
+const VOICE_TRIAL_USED_UP_MESSAGE = "That's the end of your free time with David's voice. Upgrade to Pro to keep talking.";
 
 const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
 
@@ -155,6 +156,8 @@ export default function VoiceScreen({ navigation }: any) {
   const [error, setError] = useState<string | null>(null);
   const [voiceLevels, setVoiceLevels] = useState<number[]>(IDLE_VOICE_LEVELS);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
+  const [trialVoiceRepliesRemaining, setTrialVoiceRepliesRemaining] = useState<number | null>(null);
+  const [trialUsageLoading, setTrialUsageLoading] = useState(true);
 
   const phaseRef = useRef<ScreenPhase>('checking');
   const messagesRef = useRef<ChatTurn[]>([]);
@@ -194,10 +197,37 @@ export default function VoiceScreen({ navigation }: any) {
     const email = session?.user?.email?.toLowerCase();
     return email === OWNER_EMAIL.toLowerCase();
   }, [profile, session?.user?.email]);
-  // Live voice is Pro-only. There is no free voice trial, so paid access is
-  // the whole answer and the only thing to wait on is the profile load.
-  const hasVoiceAccess = hasPaidVoiceAccess;
-  const voiceAccessChecking = !hasPaidVoiceAccess && userContextLoading;
+  // Pro talks forever; everyone else gets a short free run of spoken replies,
+  // once per account. The server is what actually spends them — this is only
+  // so the screen can show the wall instead of starting a doomed conversation.
+  const hasVoiceAccess = hasPaidVoiceAccess
+    || (trialVoiceRepliesRemaining !== null && trialVoiceRepliesRemaining > 0);
+  // Until the free replies are counted we cannot tell a trial user apart from
+  // someone who has already used every one.
+  const voiceAccessChecking = !hasPaidVoiceAccess && (userContextLoading || trialUsageLoading);
+
+  const getTrialHeaders = async () => {
+    const { supabase: sb } = await import('../services/supabase');
+    if (!sb) throw new Error('Please sign in to try David.');
+    const { data: { session: currentSession } } = await sb.auth.getSession();
+    if (!currentSession?.access_token) throw new Error('Please sign in to try David.');
+    return { 'Content-Type': 'application/json', Authorization: `Bearer ${currentSession.access_token}` };
+  };
+
+  const refreshTrialUsage = async () => {
+    if (hasPaidVoiceAccess) { setTrialVoiceRepliesRemaining(null); setTrialUsageLoading(false); return; }
+    if (isGuest) { setTrialVoiceRepliesRemaining(0); setTrialUsageLoading(false); return; }
+    if (!session?.user?.id) { setTrialVoiceRepliesRemaining(0); setTrialUsageLoading(false); return; }
+    try {
+      const response = await fetch('/api/david-trial', { headers: await getTrialHeaders() });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Unable to check your free replies.');
+      setTrialVoiceRepliesRemaining(Number(data?.voice?.remaining ?? 0));
+    } catch (trialError: any) {
+      console.error('[David Voice] Trial usage check failed:', trialError);
+      setTrialVoiceRepliesRemaining(0);
+    } finally { setTrialUsageLoading(false); }
+  };
 
   const setPhase =(next: ScreenPhase | ((current: ScreenPhase) => ScreenPhase)) => {
     const resolved = typeof next === 'function' ? next(phaseRef.current) : next;
@@ -832,9 +862,13 @@ export default function VoiceScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => {
+    if (!userContextLoading) void refreshTrialUsage();
+  }, [userContextLoading, session?.user?.id, hasPaidVoiceAccess]);
+
+  useEffect(() => {
     if (userContextLoading) return;
     if (hasVoiceAccess) {
-      setError(current => (current === VOICE_PRO_REQUIRED_MESSAGE ? null : current));
+      setError(current => (current === VOICE_TRIAL_USED_UP_MESSAGE ? null : current));
       // This screen is the only place voice mode is ever switched on.
       setVoiceModeActive(true);
       setPhase(current => (current === 'checking' ? 'idle' : current));
@@ -941,6 +975,16 @@ export default function VoiceScreen({ navigation }: any) {
       if (!mountedRef.current) return;
       if (!isCurrentConversation(localConversationId, requestId)) return;
 
+      // The free replies ran out on this very turn. Stop the conversation
+      // where it stands and show the upgrade wall instead of an error.
+      if (isChatLimitReachedError(err)) {
+        setTrialVoiceRepliesRemaining(0);
+        void endVoiceSessionForPaywall();
+        setError(VOICE_TRIAL_USED_UP_MESSAGE);
+        setPhase('ended');
+        return;
+      }
+
       setError(err?.message || 'David could not respond right now.');
       setPhase('error');
     } finally {
@@ -957,7 +1001,7 @@ export default function VoiceScreen({ navigation }: any) {
   const handleStartConversation = async () => {
     if (elevenLabsConversation.status !== 'disconnected') return;
     if (voiceAccessChecking) return;
-    if (!hasVoiceAccess) { setError(VOICE_PRO_REQUIRED_MESSAGE); return; }
+    if (!hasVoiceAccess) { setError(VOICE_TRIAL_USED_UP_MESSAGE); return; }
 
     const userId = session?.user?.id || profile?.id || 'guest';
 
@@ -986,6 +1030,27 @@ export default function VoiceScreen({ navigation }: any) {
       console.error('[David Voice] ElevenLabs session failed to start:', err);
       setError(err?.message || 'David could not start the voice conversation.');
       setPhase('error');
+    }
+  };
+
+  /**
+   * Shuts the conversation down mid-turn because the free replies just ran
+   * out. Unlike handleEndConversation this leaves `error` alone, so the
+   * upgrade message the caller set survives and stays on screen.
+   */
+  const endVoiceSessionForPaywall = async () => {
+    conversationActiveRef.current = false;
+    abortPendingRequests();
+    stopListening(true);
+    stopVoiceActivity();
+    stopCurrentAudio();
+    setVoiceModeActive(false);
+
+    if (elevenLabsConversation.status === 'disconnected') return;
+    try {
+      await elevenLabsConversation.endSession();
+    } catch (err: any) {
+      console.error('[David Voice] Could not close the voice session at the paywall:', err);
     }
   };
 
@@ -1066,7 +1131,7 @@ export default function VoiceScreen({ navigation }: any) {
         <View style={styles.lockCard}>
           <Lock color="#d4af37" size={48} style={{ marginBottom: 20 }} />
           <Text style={styles.lockTitle} role="heading" aria-level={1}>Meet David</Text>
-          <Text style={styles.lockText}>Create a free account to try David with 25 messages. No credit card required.</Text>
+          <Text style={styles.lockText}>Create a free account to try David with 25 messages and 5 spoken replies. No credit card required.</Text>
           <TouchableOpacity style={styles.lockUpgradeButton} onPress={() => navigation.navigate('Auth')} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Create a free account to meet David">
             <Text style={styles.lockUpgradeButtonText}>Create Free Account</Text>
           </TouchableOpacity>
@@ -1076,7 +1141,7 @@ export default function VoiceScreen({ navigation }: any) {
     );
   }
 
-  if (!userContextLoading && !hasVoiceAccess) {
+  if (!userContextLoading && !trialUsageLoading && !hasVoiceAccess) {
     return (
       <View style={styles.lockedContainer}>
         <View style={styles.lockCard}>
@@ -1202,6 +1267,30 @@ export default function VoiceScreen({ navigation }: any) {
           </View>
         </View>
 
+        {!hasPaidVoiceAccess && voiceAccessChecking && (
+          <Text style={styles.trialVoiceCounter}>Checking your free replies…</Text>
+        )}
+        {!hasPaidVoiceAccess && !voiceAccessChecking && trialVoiceRepliesRemaining !== null && (
+          <View style={styles.trialUpgradeRow}>
+            <Text style={styles.trialVoiceCounter}>
+              {trialVoiceRepliesRemaining === 1
+                ? '1 free reply left'
+                : `${trialVoiceRepliesRemaining} free replies left`}
+            </Text>
+            <TouchableOpacity
+              style={[styles.trialUpgradeButton, upgradeLoading && styles.lockUpgradeButtonDisabled]}
+              onPress={handleUpgradeToPro}
+              disabled={upgradeLoading}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`Upgrade to ${PLANS.PRO.name}, ${PLANS.PRO.price} per ${PLANS.PRO.interval}`}
+            >
+              <Text style={styles.trialUpgradeButtonText}>
+                {upgradeLoading ? 'Starting checkout...' : `Upgrade to ${PLANS.PRO.name}`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={styles.conversationControls}>
           <TouchableOpacity
             style={[
@@ -1298,7 +1387,7 @@ export default function VoiceScreen({ navigation }: any) {
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
-            {error === VOICE_PRO_REQUIRED_MESSAGE && (
+            {error === VOICE_TRIAL_USED_UP_MESSAGE && (
               <TouchableOpacity
                 style={[styles.lockUpgradeButton, styles.errorUpgradeButton, upgradeLoading && styles.lockUpgradeButtonDisabled]}
                 onPress={handleUpgradeToPro}
@@ -1522,6 +1611,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#d4af37',
     boxShadow: '0 4px 8px rgba(212, 175, 55, 0.35)',
   },
+  trialVoiceCounter: { color: '#c8b46b', fontSize: 10, textAlign: 'center', marginBottom: 8 },
+  trialUpgradeRow: { alignItems: 'center', marginBottom: 8 },
+  trialUpgradeButton: {
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#d4af37',
+    backgroundColor: 'rgba(212, 175, 55, 0.12)',
+  },
+  trialUpgradeButtonText: { color: '#d4af37', fontSize: 12, fontWeight: '700', textAlign: 'center' },
   errorUpgradeButton: { marginTop: 12, alignSelf: 'center' },
   conversationControls: {
     width: '100%',

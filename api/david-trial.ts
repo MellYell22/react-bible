@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { ENTITLEMENT_COLUMNS, canUsePremium, canUsePro, resolveAccessTier } from '../lib/subscriptionState.js';
+import { FREE_VOICE_TRIAL_MESSAGES } from '../lib/chatAccess.js';
 
 const TEXT_LIMIT = 25;
 
@@ -25,8 +26,8 @@ const clients = (token: string) => {
 };
 
 export default async function handler(req: any, res: any) {
-  // Read-only. This used to accept POSTs that burned down a free voice trial;
-  // live voice is Pro-only now, so there is no voice allowance to spend.
+  // Read-only. The voice trial is spent server-side in lib/chatAccess.ts as
+  // each spoken turn happens, so there is nothing for a client to post here.
   if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
 
@@ -45,16 +46,22 @@ export default async function handler(req: any, res: any) {
     const paidText = canUsePremium(tier);
     const paidVoice = canUsePro(tier);
 
-    const { data: usage, error: usageError } = await service.from('david_intro_trial_usage').select('text_messages_used').eq('user_id', user.id).maybeSingle();
+    const { data: usage, error: usageError } = await service.from('david_intro_trial_usage').select('text_messages_used, voice_messages_used').eq('user_id', user.id).maybeSingle();
     if (usageError) throw usageError;
     const textUsed = Number(usage?.text_messages_used || 0);
+    const voiceUsed = Number(usage?.voice_messages_used || 0);
 
     return json(res, 200, {
       tier,
       owner,
       text: { paid: paidText, limit: TEXT_LIMIT, used: textUsed, remaining: paidText ? null : Math.max(0, TEXT_LIMIT - textUsed) },
-      // No free voice allowance exists any more: Pro is the only way in.
-      voice: { paid: paidVoice, limitSeconds: 0, usedSeconds: 0, remainingSeconds: 0 },
+      // Spoken exchanges, not minutes. Spent in lib/chatAccess.ts per turn.
+      voice: {
+        paid: paidVoice,
+        limit: FREE_VOICE_TRIAL_MESSAGES,
+        used: voiceUsed,
+        remaining: paidVoice ? null : Math.max(0, FREE_VOICE_TRIAL_MESSAGES - voiceUsed),
+      },
     });
   } catch (error: any) {
     console.error('[David Trial] Failed:', error?.message || error);
