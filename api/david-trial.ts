@@ -2,7 +2,6 @@ import { createClient } from '@supabase/supabase-js';
 import { ENTITLEMENT_COLUMNS, canUsePremium, canUsePro, resolveAccessTier } from '../lib/subscriptionState.js';
 
 const TEXT_LIMIT = 25;
-const VOICE_SECONDS_LIMIT = 60 * 60;
 
 const firstConfigured = (...values: Array<string | undefined>) => values.map(v => v?.trim()).find(Boolean) || '';
 
@@ -26,7 +25,9 @@ const clients = (token: string) => {
 };
 
 export default async function handler(req: any, res: any) {
-  if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+  // Read-only. This used to accept POSTs that burned down a free voice trial;
+  // live voice is Pro-only now, so there is no voice allowance to spend.
+  if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
 
   const token = getBearerToken(req);
@@ -44,26 +45,16 @@ export default async function handler(req: any, res: any) {
     const paidText = canUsePremium(tier);
     const paidVoice = canUsePro(tier);
 
-    const { data: usage, error: usageError } = await service.from('david_intro_trial_usage').select('text_messages_used, voice_seconds_used').eq('user_id', user.id).maybeSingle();
+    const { data: usage, error: usageError } = await service.from('david_intro_trial_usage').select('text_messages_used').eq('user_id', user.id).maybeSingle();
     if (usageError) throw usageError;
     const textUsed = Number(usage?.text_messages_used || 0);
-    let voiceUsed = Number(usage?.voice_seconds_used || 0);
-
-    if (req.method === 'POST' && !paidVoice) {
-      const seconds = Math.max(0, Math.min(120, Math.floor(Number(req.body?.voiceSeconds || 0))));
-      if (seconds > 0) {
-        const { data: rows, error } = await service.rpc('consume_david_intro_voice_seconds', { p_user_id: user.id, p_seconds: seconds });
-        if (error) throw error;
-        const row = Array.isArray(rows) ? rows[0] : rows;
-        voiceUsed = Number(row?.voice_seconds_used ?? voiceUsed);
-      }
-    }
 
     return json(res, 200, {
       tier,
       owner,
       text: { paid: paidText, limit: TEXT_LIMIT, used: textUsed, remaining: paidText ? null : Math.max(0, TEXT_LIMIT - textUsed) },
-      voice: { paid: paidVoice, limitSeconds: VOICE_SECONDS_LIMIT, usedSeconds: voiceUsed, remainingSeconds: paidVoice ? null : Math.max(0, VOICE_SECONDS_LIMIT - voiceUsed) },
+      // No free voice allowance exists any more: Pro is the only way in.
+      voice: { paid: paidVoice, limitSeconds: 0, usedSeconds: 0, remainingSeconds: 0 },
     });
   } catch (error: any) {
     console.error('[David Trial] Failed:', error?.message || error);
