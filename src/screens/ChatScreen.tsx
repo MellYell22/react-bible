@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { BookOpen, MoreHorizontal, Send, Square, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
-import { generateSpeech, SPEECH_USER_TAP } from '../services/ai';
+import { generateSpeech, isChatLimitReachedError, SPEECH_USER_TAP } from '../services/ai';
 import { ChatMessage } from '../types';
 import { saveAIFeedback, supabase } from '../services/supabase';
 import { createCheckoutSession, type CheckoutPlan } from '../services/stripe';
@@ -198,7 +198,12 @@ export default function ChatScreen({ navigation, route }: any) {
       audio.onended = () => { setSpeakingIndex(null); URL.revokeObjectURL(audioUrl); currentAudioRef.current = null; };
       audio.onerror = () => { setSpeakingIndex(null); URL.revokeObjectURL(audioUrl); currentAudioRef.current = null; };
       await audio.play();
-    } catch { setSpeakingIndex(null); }
+    } catch (speakError) {
+      setSpeakingIndex(null);
+      // Out of free voice: show the upgrade screen rather than a button that
+      // silently does nothing.
+      if (isChatLimitReachedError(speakError)) setLimitReached(true);
+    }
   };
 
   const handleUpgrade = async (plan: CheckoutPlan) => {

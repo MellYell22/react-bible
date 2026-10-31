@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { sanitizeForDavidSpeech } from '../src/utils/davidSpeechDelivery.js';
 import { getOpenAIApiKey } from '../lib/openaiEnv.js';
-import { requireSignedInUser } from '../lib/chatAccess.js';
+import { requireVoicePlaybackAccess } from '../lib/chatAccess.js';
 import {
   buildDavidSpeechBody,
   DAVID_TTS_MODEL,
@@ -39,8 +39,10 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const denied = await requireSignedInUser(req);
-  if (denied) return res.status(denied.status).json({ code: 'AUTH_REQUIRED', error: denied.error });
+  // David's voice costs real money per call. Pro and the free trial are the
+  // only ways in; being signed in is not enough.
+  const denied = await requireVoicePlaybackAccess(req);
+  if (denied) return res.status(denied.status).json({ code: denied.code, error: denied.error });
 
   const { text } = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
 

@@ -37,6 +37,7 @@ export const FREE_VOICE_TRIAL_MESSAGES = 5;
 
 const USAGE_TABLE = 'david_conversation_memory';
 const VOICE_TRIAL_RPC = 'consume_david_intro_voice_message';
+const VOICE_TRIAL_TABLE = 'david_intro_trial_usage';
 
 export type ChatAccessDenialBody = {
   error: string;
@@ -300,25 +301,87 @@ export const checkChatAccess = async (
   return allow('under-limit', tier, used, FREE_DAILY_MESSAGE_LIMIT);
 };
 
+
 /**
- * Gate for paid-cost endpoints (voice audio, transcription): the caller must
- * be a signed-in account. Returns null when allowed. Fails open only when Supabase is not configured,
- * matching checkChatAccess.
+ * Gate for the endpoints that actually cost money to speak and to listen:
+ * text-to-speech and transcription.
+ *
+ * David's spoken voice is a Pro feature with a short free trial, so these
+ * follow the same rule as live voice. Being merely signed in is not enough —
+ * that let any free account replay David's voice without limit, straight past
+ * the paywall, by tapping the speaker button or calling the endpoint directly.
+ *
+ * This only checks; it never spends. The trial is counted one reply at a time
+ * where the replies happen, so checking here must not double-charge.
+ *
+ * Returns null when allowed.
  */
-export const requireSignedInUser = async (
+export const requireVoicePlaybackAccess = async (
   req: any,
-): Promise<{ status: number; error: string } | null> => {
+): Promise<{ status: number; code: string; error: string } | null> => {
   const supabaseUrl = getSupabaseUrl();
   const verifyKey = getVerifyKey();
+  // A deploy with no Supabase configured should not take the app down; the
+  // same fail-open rule the rest of this file uses.
   if (!supabaseUrl || !verifyKey) return null;
 
   const token = getBearerToken(req);
-  if (!token) return { status: 401, error: 'Please sign in to use David\'s voice.' };
+  if (!token) {
+    return { status: 401, code: 'AUTH_REQUIRED', error: "Please sign in to use David's voice." };
+  }
 
   const authClient = createClient(supabaseUrl, verifyKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
   });
+
   const { data: { user } = { user: null }, error } = await (authClient.auth as any).getUser(token);
-  if (error || !user) return { status: 401, error: 'Your sign-in session expired. Please sign in again.' };
-  return null;
+  if (error || !user) {
+    return { status: 401, code: 'AUTH_REQUIRED', error: 'Your sign-in session expired. Please sign in again.' };
+  }
+
+  const { data: profile } = await authClient
+    .from('profiles')
+    .select(ENTITLEMENT_COLUMNS)
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const tier = resolveAccessTier({ profile, userEmail: user.email || null });
+  if (canUsePro(tier)) return null;
+
+  const serviceKey = getServiceKey();
+  if (!serviceKey) {
+    console.error('[ChatAccess] Voice trial metering is not configured.');
+    return {
+      status: 503,
+      code: 'VOICE_TRIAL_METER_UNAVAILABLE',
+      error: "David's voice is temporarily unavailable. Please try again shortly.",
+    };
+  }
+
+  const usageClient = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data: usage, error: usageError } = await usageClient
+    .from(VOICE_TRIAL_TABLE)
+    .select('voice_messages_used')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (usageError) {
+    // Same rule as everywhere else: a blip must not lock out someone who is
+    // entitled. The trial counter itself still stops them at five.
+    console.warn('[ChatAccess] Voice trial lookup failed:', usageError.message);
+    return null;
+  }
+
+  const used = Number((usage as any)?.voice_messages_used ?? 0);
+  if (Number.isFinite(used) && used < FREE_VOICE_TRIAL_MESSAGES) return null;
+
+  return {
+    status: 402,
+    code: 'VOICE_TRIAL_EXHAUSTED',
+    error: "That's the end of your free time with David's voice. Upgrade to Pro to keep talking.",
+  };
 };

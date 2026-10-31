@@ -921,6 +921,11 @@ export const generateSpeech = async (
       throw new Error('OpenAI rejected the current API key. David can respond in text, but voice audio cannot be generated yet.');
     }
 
+    // David's voice is Pro once the free trial is gone. Raise the same error
+    // the chat endpoint raises so callers show the upgrade wall rather than a
+    // dead speaker button.
+    throwIfLimitReached(response.status, error);
+
     throw new Error(error.error || `David's voice audio could not be generated (${response.status}).`);
   }
 
