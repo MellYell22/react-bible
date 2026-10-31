@@ -12,9 +12,11 @@ import {
  * The app's own UI only reaches this endpoint from VoiceScreen, always with
  * `liveVoice: true` — text chat goes through the `david-chat` Supabase edge
  * function instead, which has its own separate limit in api/david-chat.ts.
- * That means the `under-limit` / `denied` counting path below is never
- * exercised by the app today: `liveVoice` requests are resolved by the
- * premium check or the flat Pro-only denial before reaching it.
+ * `liveVoice` requests are resolved by the premium check, then by the free
+ * voice intro trial (the same 60 minutes the Voice screen shows, metered by
+ * api/david-trial.ts), and only then by the Pro-only denial. That means the
+ * `under-limit` / `denied` text counting path below is never exercised by
+ * the app today.
  *
  * It stays in place anyway. `/api/chat` is a public HTTP endpoint — anyone
  * can POST to it directly with `liveVoice: false` or omitted, bypassing the
@@ -26,7 +28,15 @@ import {
 
 export const FREE_DAILY_MESSAGE_LIMIT = 5;
 
+/**
+ * One-time free trial of David's spoken voice, in seconds. Must match
+ * VOICE_SECONDS_LIMIT in api/david-trial.ts and the check constraint on
+ * `david_intro_trial_usage.voice_seconds_used`.
+ */
+export const FREE_VOICE_TRIAL_SECONDS = 60 * 60;
+
 const USAGE_TABLE = 'david_conversation_memory';
+const VOICE_TRIAL_TABLE = 'david_intro_trial_usage';
 
 export type ChatAccessDenialBody = {
   error: string;
@@ -44,7 +54,7 @@ export type ChatAccessDenialBody = {
  */
 export type ChatAccessResult = {
   allowed: boolean;
-  reason: 'premium' | 'under-limit' | 'unidentified' | 'billing-not-configured' | 'denied';
+  reason: 'premium' | 'voice-trial' | 'under-limit' | 'unidentified' | 'billing-not-configured' | 'denied';
   tier: string | null;
   used: number | null;
   limit: number | null;
@@ -109,6 +119,30 @@ const countTodaysMessages = async (
     return null;
   }
   return count ?? 0;
+};
+
+/**
+ * Seconds of the free voice trial this person has already used. No row yet
+ * means they have not started the trial, so 0. Returns null only when the
+ * lookup itself fails.
+ */
+const getVoiceTrialSecondsUsed = async (
+  client: SupabaseClient,
+  userId: string,
+): Promise<number | null> => {
+  const { data, error } = await client
+    .from(VOICE_TRIAL_TABLE)
+    .select('voice_seconds_used')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[ChatAccess] Voice trial lookup failed:', error.message);
+    return null;
+  }
+
+  const used = Number((data as any)?.voice_seconds_used ?? 0);
+  return Number.isFinite(used) && used > 0 ? used : 0;
 };
 
 const allow = (
@@ -188,21 +222,38 @@ export const checkChatAccess = async (
     return allow('premium', tier, null, null);
   }
 
-  if (options.liveVoice) {
-    return deny(402, {
-      error: 'Upgrade required',
-      message: "David's spoken voice is part of David's Voice Pro.",
-      limitReached: true,
-      tier,
-    });
-  }
-
   const serviceKey = getServiceKey();
   const usageClient = serviceKey
     ? createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
     : authClient;
+
+  if (options.liveVoice) {
+    // Every account without Pro gets a one-time intro trial of David's voice.
+    // The Voice screen shows that trial and reports elapsed seconds to
+    // api/david-trial.ts. This gate must honor the same trial — otherwise the
+    // screen lets someone start talking and the server refuses every turn.
+    const trialUsed = await getVoiceTrialSecondsUsed(usageClient, user.id);
+
+    // Same rule as the text counter below: a failed lookup must not lock out
+    // someone the Voice screen says still has time. Allow the turn and log
+    // it — the next turn re-checks.
+    if (trialUsed === null) {
+      return allow('voice-trial', tier, null, FREE_VOICE_TRIAL_SECONDS);
+    }
+
+    if (trialUsed < FREE_VOICE_TRIAL_SECONDS) {
+      return allow('voice-trial', tier, trialUsed, FREE_VOICE_TRIAL_SECONDS);
+    }
+
+    return deny(402, {
+      error: 'Upgrade required',
+      message: 'Your free David voice time is used up. Upgrade to Pro to keep talking.',
+      limitReached: true,
+      tier,
+    });
+  }
 
   const used = await countTodaysMessages(usageClient, user.id);
 
