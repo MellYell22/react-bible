@@ -37,8 +37,8 @@ const STEPS = [
   {
     id: 'voice',
     title: 'Voice with David',
-    subtitle: '60 voice minutes included',
-    description: 'Try a real spoken conversation with David for up to 60 introductory voice minutes. Upgrade only if you want to keep going after your free time is used.',
+    subtitle: '5 free spoken replies included',
+    description: 'Try a real spoken conversation with David — he answers your first five messages out loud. Upgrade only if you want to keep going after that.',
     icon: Mic,
   },
   {

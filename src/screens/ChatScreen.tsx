@@ -226,7 +226,7 @@ export default function ChatScreen({ navigation, route }: any) {
         <View style={styles.guestCard}>
           <UserCircle2 size={48} color={APP_COLORS.gold} />
           <Text style={styles.guestTitle}>Meet David</Text>
-          <Text style={styles.guestText}>Create a free account to try David with 25 messages and 60 voice minutes. No credit card required.</Text>
+          <Text style={styles.guestText}>Create a free account to try David with 25 messages and 5 spoken replies. No credit card required.</Text>
           <TouchableOpacity style={styles.guestButton} onPress={() => navigation.navigate('Auth')} accessibilityRole="button" accessibilityLabel="Create a free account to meet David">
             <Text style={styles.guestButtonText}>Create Free Account</Text>
           </TouchableOpacity>
