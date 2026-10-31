@@ -73,6 +73,30 @@ test('the paywall shutdown stops the microphone and audio', () => {
   assert.match(fn.slice(0, 600), /setVoiceModeActive\(false\)/);
 });
 
+// A signed-in person with a full trial was being sent to the upgrade wall
+// before any request was made, because an unreadable count was treated as
+// an empty one. The server spends and enforces the trial, so the screen must
+// let an unknown count through and let the server answer.
+test('an unknown reply count lets the person start, it does not wall them off', () => {
+  assert.match(
+    source,
+    /const hasVoiceAccess = hasPaidVoiceAccess\s*\n\s*\|\| trialVoiceRepliesRemaining === null\s*\n\s*\|\| trialVoiceRepliesRemaining > 0;/,
+  );
+  // Every path that cannot determine the count must leave it unknown (null),
+  // never zero.
+  const refresh = source.slice(source.indexOf('const refreshTrialUsage'));
+  const body = refresh.slice(0, refresh.indexOf('const setPhase'));
+  assert.match(body, /if \(!session\?\.user\?\.id\) \{ setTrialVoiceRepliesRemaining\(null\)/);
+  const failure = body.slice(body.indexOf('catch (trialError'));
+  assert.match(failure, /setTrialVoiceRepliesRemaining\(null\)/);
+  assert.doesNotMatch(failure, /setTrialVoiceRepliesRemaining\(0\)/);
+});
+
+test('a lagging access token is retried instead of being read as signed out', () => {
+  const fn = source.slice(source.indexOf('const getTrialHeaders'));
+  assert.match(fn.slice(0, 800), /for \(let attempt = 0; attempt < 3; attempt\+\+\)/);
+});
+
 test('Start Conversation waits until the free replies are known', () => {
   assert.match(source, /const voiceAccessChecking = !hasPaidVoiceAccess && \(userContextLoading \|\| trialUsageLoading\)/);
   assert.match(source, /startConversationIsEnabled = !voiceAccessChecking &&/);

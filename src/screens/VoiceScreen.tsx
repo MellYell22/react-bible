@@ -198,34 +198,55 @@ export default function VoiceScreen({ navigation }: any) {
     return email === OWNER_EMAIL.toLowerCase();
   }, [profile, session?.user?.email]);
   // Pro talks forever; everyone else gets a short free run of spoken replies,
-  // once per account. The server is what actually spends them — this is only
-  // so the screen can show the wall instead of starting a doomed conversation.
+  // once per account.
+  //
+  // `null` means "not known yet" — not "none left". The count is spent and
+  // enforced on the server, so when this screen cannot read it the honest
+  // move is to let the person start and let the server answer. Treating an
+  // unknown count as zero is what used to send signed-in people with a full
+  // trial straight to the upgrade wall, before any request was even made.
   const hasVoiceAccess = hasPaidVoiceAccess
-    || (trialVoiceRepliesRemaining !== null && trialVoiceRepliesRemaining > 0);
-  // Until the free replies are counted we cannot tell a trial user apart from
-  // someone who has already used every one.
+    || trialVoiceRepliesRemaining === null
+    || trialVoiceRepliesRemaining > 0;
   const voiceAccessChecking = !hasPaidVoiceAccess && (userContextLoading || trialUsageLoading);
 
+  /**
+   * The access token can lag a moment behind the session on a cold load or a
+   * token refresh, so give it a couple of short retries rather than treating
+   * a momentary miss as "signed out".
+   */
   const getTrialHeaders = async () => {
     const { supabase: sb } = await import('../services/supabase');
     if (!sb) throw new Error('Please sign in to try David.');
-    const { data: { session: currentSession } } = await sb.auth.getSession();
-    if (!currentSession?.access_token) throw new Error('Please sign in to try David.');
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${currentSession.access_token}` };
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: { session: currentSession } } = await sb.auth.getSession();
+      if (currentSession?.access_token) {
+        return { 'Content-Type': 'application/json', Authorization: `Bearer ${currentSession.access_token}` };
+      }
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 400));
+    }
+    throw new Error('Please sign in to try David.');
   };
 
   const refreshTrialUsage = async () => {
     if (hasPaidVoiceAccess) { setTrialVoiceRepliesRemaining(null); setTrialUsageLoading(false); return; }
+    // A guest has no account to hold a trial, and already sees the sign-up
+    // card rather than this one.
     if (isGuest) { setTrialVoiceRepliesRemaining(0); setTrialUsageLoading(false); return; }
-    if (!session?.user?.id) { setTrialVoiceRepliesRemaining(0); setTrialUsageLoading(false); return; }
+    // Still resolving who this is: unknown, not used up.
+    if (!session?.user?.id) { setTrialVoiceRepliesRemaining(null); setTrialUsageLoading(false); return; }
     try {
       const response = await fetch('/api/david-trial', { headers: await getTrialHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || 'Unable to check your free replies.');
-      setTrialVoiceRepliesRemaining(Number(data?.voice?.remaining ?? 0));
+      const remaining = data?.voice?.paid ? null : Number(data?.voice?.remaining ?? 0);
+      setTrialVoiceRepliesRemaining(Number.isFinite(remaining as number) ? remaining : null);
     } catch (trialError: any) {
+      // Could not read the count. Let the server be the judge on the first
+      // turn instead of locking someone out of a trial they still have.
       console.error('[David Voice] Trial usage check failed:', trialError);
-      setTrialVoiceRepliesRemaining(0);
+      setTrialVoiceRepliesRemaining(null);
     } finally { setTrialUsageLoading(false); }
   };
 
