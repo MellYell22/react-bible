@@ -38,7 +38,7 @@ export const PLANS = {
     priceId: import.meta.env.VITE_STRIPE_PRICE_ID_PRO || null,
     features: [
       'Everything in Bible Plus',
-      "David's voice chat",
+      "Unlimited voice chat with David",
       'Deeper scripture reflections',
       'Priority responses',
     ],

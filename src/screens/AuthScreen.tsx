@@ -24,11 +24,14 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(true);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [preferredTranslation, setPreferredTranslation] = useState('NIV');
   const [showTranslations, setShowTranslations] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmationSentTo, setConfirmationSentTo] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
+  const [resendNote, setResendNote] = useState<string | null>(null);
 
   const handleAuth = async () => {
     setError(null);
@@ -82,7 +85,14 @@ export default function AuthScreen() {
           ]);
         }
 
-        alert('Check your email for confirmation!');
+        if (data.session) {
+          // Email confirmation is off for this project: the session is live
+          // and the app shell will move on to onboarding automatically.
+          setConfirmationSentTo(null);
+        } else {
+          // No session yet: the account needs email confirmation first.
+          setConfirmationSentTo(email);
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -93,6 +103,58 @@ export default function AuthScreen() {
       setLoading(false);
     }
   };
+
+  const handleResendConfirmation = async () => {
+    if (!supabase || !confirmationSentTo || resending) return;
+    setResending(true);
+    setResendNote(null);
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email: confirmationSentTo });
+      if (error) throw error;
+      setResendNote('Confirmation email sent again. Please check your inbox (and spam folder).');
+    } catch (error: any) {
+      setResendNote(error.message || 'Could not resend the email. Please try again in a moment.');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  if (confirmationSentTo) {
+    return (
+      <FullScreenBackground center={false}>
+        <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.mainContent}>
+            <Text style={styles.mainTitle}>CHECK YOUR EMAIL</Text>
+            <View style={styles.form}>
+              <Text style={styles.confirmationText}>
+                We sent a confirmation link to {confirmationSentTo}. Tap that link to finish creating your account, then come back here and sign in.
+              </Text>
+              <TouchableOpacity style={styles.signInButton} onPress={handleResendConfirmation} disabled={resending}>
+                {resending ? (
+                  <ActivityIndicator color="#00213d" />
+                ) : (
+                  <Text style={styles.signInButtonText}>RESEND CONFIRMATION EMAIL</Text>
+                )}
+              </TouchableOpacity>
+              {!!resendNote && <Text style={styles.resendNote}>{resendNote}</Text>}
+              <TouchableOpacity
+                style={styles.createAccountButton}
+                onPress={() => { setConfirmationSentTo(null); setIsSignUp(false); setResendNote(null); }}
+              >
+                <Text style={styles.createAccountText}>BACK TO SIGN IN</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.guestButton}
+                onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}
+              >
+                <Text style={styles.guestButtonText}>CONTINUE AS GUEST — FIND A VERSE NOW</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      </FullScreenBackground>
+    );
+  }
 
   return (
     <FullScreenBackground center={false}>
@@ -234,12 +296,12 @@ export default function AuthScreen() {
               </TouchableOpacity>
             )}
 
-            {!isResettingPassword && !isSignUp && (
+            {!isResettingPassword && (
               <TouchableOpacity
-                style={styles.guestLinkContainer}
+                style={styles.guestButton}
                 onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}
               >
-                <Text style={styles.guestLink}>CONTINUE AS GUEST</Text>
+                <Text style={styles.guestButtonText}>CONTINUE AS GUEST — FIND A VERSE NOW</Text>
               </TouchableOpacity>
             )}
 
@@ -534,16 +596,41 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
   },
-  guestLinkContainer: {
-    paddingVertical: 8,
+  guestButton: {
+    width: '100%',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: GOLD,
+    paddingVertical: 12,
+    borderRadius: 0,
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 16,
   },
-  guestLink: {
-    color: 'rgba(239, 199, 68, 0.5)',
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 0.8,
+  guestButtonText: {
+    color: GOLD,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
+    textAlign: 'center',
+  },
+  confirmationText: {
+    color: '#ffffff',
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    fontFamily: 'Playfair Display',
+    marginBottom: 20,
+  },
+  resendNote: {
+    color: SOFT_GOLD,
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+    fontFamily: 'Playfair Display',
+    marginBottom: 16,
   },
   toggleContainer: {
     marginTop: 24,

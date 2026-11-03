@@ -20,14 +20,14 @@ const PLAN_COPY = [
     name: 'PLUS',
     price: PLANS.PLUS.price,
     suffix: '/month',
-    features: ['Unlimited text chat', 'Expanded reflections', 'Save your favorites', 'Ad-free experience'],
+    features: ['Unlimited text chat', 'Unlimited reflections', 'Save your favorites', 'Ad-free experience'],
   },
   {
     id: 'pro' as const,
     name: 'PRO',
     price: PLANS.PRO.price,
     suffix: '/month',
-    features: ['Everything in Plus', '1 hour of voice chat per month', 'Deeper, personalized reflections', 'Priority support'],
+    features: ['Everything in Plus', 'Unlimited voice chat with David', 'Deeper, personalized reflections', 'Priority support'],
   },
 ];
 
@@ -93,7 +93,7 @@ export default function PricingScreen({ route }: any) {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.headingBlock}>
-        <Text style={styles.title}>UNLOCK MORE WITH{compact ? '\n' : ' '}BIBLE AI COMPANION</Text>
+        <Text style={styles.title}>UNLOCK MORE WITH{compact ? '\n' : ' '}BIBLE MOOD SEARCH</Text>
         <Text style={styles.subtitle}>GO DEEPER. ANYTIME. ANYWHERE.</Text>
       </View>
 
@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
   statusText: { color: APP_COLORS.cream, fontFamily: APP_FONTS.sans, fontSize: 12, textAlign: 'center' },
   planRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12 },
   planRowCompact: { flexDirection: 'column' },
-  planCard: { flex: 1, minHeight: 326, borderWidth: 1, borderColor: APP_COLORS.border, backgroundColor: APP_COLORS.navyDeep, padding: 20 },
+  planCard: { flex: 1, minHeight: 326, borderWidth: 1, borderColor: APP_COLORS.border, backgroundColor: APP_COLORS.panel, padding: 20 },
   planCardCompact: { width: '100%', minHeight: 0 },
   featuredCard: { borderWidth: 2, borderColor: APP_COLORS.gold },
   planName: { color: APP_COLORS.cream, fontFamily: APP_FONTS.serif, fontSize: 16, fontWeight: '700', textAlign: 'center', letterSpacing: 1 },
