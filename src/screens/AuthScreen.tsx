@@ -10,7 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { Globe, Menu, Search, User, Settings } from 'lucide-react';
+import { Globe, Menu, Search, User, Settings, Play, Pause } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { FullScreenBackground } from '../components/FullScreenBackground';
 import { useUser } from '../UserContext';
@@ -156,6 +156,25 @@ export default function AuthScreen() {
     );
   }
 
+  const davidAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [davidPlaying, setDavidPlaying] = useState(false);
+  const toggleMeetDavid = () => {
+    try {
+      if (!davidAudioRef.current) {
+        const a = new Audio('/audio/david-invite.mp3');
+        a.preload = 'none';
+        a.onended = () => setDavidPlaying(false);
+        a.onerror = () => setDavidPlaying(false);
+        a.onpause = () => setDavidPlaying(false);
+        davidAudioRef.current = a;
+      }
+      const a = davidAudioRef.current;
+      if (a.paused) { a.currentTime = 0; a.play().then(() => setDavidPlaying(true)).catch(() => setDavidPlaying(false)); }
+      else { a.pause(); setDavidPlaying(false); }
+    } catch { setDavidPlaying(false); }
+  };
+  React.useEffect(() => () => { try { davidAudioRef.current?.pause(); } catch {} }, []);
+
   return (
     <FullScreenBackground center={false}>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
@@ -219,6 +238,23 @@ export default function AuthScreen() {
 
         <View style={styles.mainContent}>
           <Text style={styles.mainTitle}>ENTER SANCTUARY</Text>
+
+          {/* David speaks first: browsers block autoplay, so one tap starts him. */}
+          <TouchableOpacity
+            style={styles.meetDavidPanel}
+            onPress={toggleMeetDavid}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Tap to hear David introduce himself"
+          >
+            <View style={styles.meetDavidIcon}>
+              {davidPlaying ? <Pause size={18} color="#071a35" /> : <Play size={18} color="#071a35" />}
+            </View>
+            <View style={styles.meetDavidCopy}>
+              <Text style={styles.meetDavidTitle}>{davidPlaying ? 'DAVID IS SPEAKING\u2026' : 'TAP TO MEET DAVID'}</Text>
+              <Text style={styles.meetDavidHint}>Hear his voice before you start.</Text>
+            </View>
+          </TouchableOpacity>
 
           <View style={styles.form}>
             {/* Guest entry sits above the form: most first-time visitors want
@@ -636,6 +672,40 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     fontFamily: 'Cinzel',
+  },
+  meetDavidPanel: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderWidth: 1.5,
+    borderColor: GOLD,
+    backgroundColor: 'rgba(225,182,50,0.08)',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 22,
+  },
+  meetDavidIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meetDavidCopy: { flex: 1, minWidth: 0 },
+  meetDavidTitle: {
+    color: GOLD,
+    fontFamily: 'Cinzel',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  meetDavidHint: {
+    color: 'rgba(255,248,231,0.8)',
+    fontFamily: 'Playfair Display',
+    fontSize: 12,
+    marginTop: 3,
   },
   guestButton: {
     width: '100%',
