@@ -248,7 +248,7 @@ export default function AuthScreen() {
             accessibilityLabel="Tap to hear David introduce himself"
           >
             <View style={styles.meetDavidIcon}>
-              {davidPlaying ? <Pause size={18} color="#071a35" /> : <Play size={18} color="#071a35" />}
+              {davidPlaying ? <Pause size={16} color="#071a35" /> : <Play size={16} color="#071a35" />}
             </View>
             <View style={styles.meetDavidCopy}>
               <Text style={styles.meetDavidTitle}>{davidPlaying ? 'DAVID IS SPEAKING\u2026' : 'TAP TO MEET DAVID'}</Text>
@@ -675,20 +675,22 @@ const styles = StyleSheet.create({
   },
   meetDavidPanel: {
     width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
     borderWidth: 1.5,
     borderColor: GOLD,
     backgroundColor: 'rgba(225,182,50,0.08)',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
     marginBottom: 22,
   },
   meetDavidIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: GOLD,
     alignItems: 'center',
     justifyContent: 'center',
