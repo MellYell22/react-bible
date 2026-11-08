@@ -39,6 +39,58 @@ const createGuestProfile = (preferredTranslation: Profile['preferred_translation
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// --- Guest deep links -----------------------------------------------------
+// Paid and shared traffic should land on the mood picker, not on a password
+// form. A link such as https://www.mybibleaicompanion.com/?guest=1 (or /start)
+// opens the app directly in guest mode.
+const GUEST_LINK_PARAMS = ['guest', 'try', 'start'];
+const GUEST_LINK_PATHS = /^\/(start|try)\/?$/i;
+
+// Stripe sends people back with these; those trips need the real session and
+// must never be downgraded to a guest session.
+const hasStripeReturnParams = (params: URLSearchParams, pathname: string) =>
+  params.get('success') === 'true' ||
+  params.has('session_id') ||
+  params.get('canceled') === 'true' ||
+  params.get('showPricing') === 'true' ||
+  pathname.includes('payment-success') ||
+  pathname.includes('pricing');
+
+const isTruthyParam = (value: string | null) =>
+  value !== null && value !== '0' && value.toLowerCase() !== 'false';
+
+/**
+ * Returns true when this page load came from a guest deep link, and clears the
+ * marker from the address bar so a later refresh or sign-up is not pinned to
+ * guest mode. Safe to call once per load.
+ */
+const consumeGuestLinkIntent = (): boolean => {
+  if (typeof window === 'undefined') return false;
+
+  const { search, pathname, hash } = window.location;
+  const params = new URLSearchParams(search);
+
+  if (hasStripeReturnParams(params, pathname)) return false;
+
+  const matchedParam = GUEST_LINK_PARAMS.some((key) => isTruthyParam(params.get(key)));
+  const matchedPath = GUEST_LINK_PATHS.test(pathname);
+  if (!matchedParam && !matchedPath) return false;
+
+  try {
+    GUEST_LINK_PARAMS.forEach((key) => params.delete(key));
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      `${matchedPath ? '/' : pathname}${nextSearch ? `?${nextSearch}` : ''}${hash || ''}`,
+    );
+  } catch {
+    // Tidying the address bar is cosmetic — never block entry on it.
+  }
+
+  return true;
+};
+
 const withProfileTimeout = async <T,>(promise: Promise<T>, timeoutMs = PROFILE_FETCH_TIMEOUT_MS): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const timeout = new Promise<never>((_, reject) => {
@@ -59,6 +111,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const profileFetchInFlightRef = useRef<Promise<Profile | null> | null>(null);
+  // A guest session exists only in memory. Supabase still emits INITIAL_SESSION
+  // with a null session on subscribe, which would otherwise evict the guest we
+  // just let in via a deep link or the "continue as guest" button.
+  const guestModeRef = useRef(false);
 
   // Safety net: ensure loading screen eventually disappears
   useEffect(() => {
@@ -71,14 +127,28 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, [loading]);
 
+  const continueAsGuest = useCallback((preferredTranslation: Profile['preferred_translation'] = 'NIV') => {
+    guestModeRef.current = true;
+    setSession(createGuestSession());
+    setProfile(createGuestProfile(preferredTranslation));
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     if (!isSupabaseConfigured) {
+      // No backend configured: a guest link should still open the app.
+      if (consumeGuestLinkIntent()) continueAsGuest();
       setLoading(false);
       return;
     }
 
     // Get initial session
     supabase!.auth.getSession().then(({ data: { session } }) => {
+      // A real signed-in session always wins over a guest deep link.
+      if (!session && consumeGuestLinkIntent()) {
+        continueAsGuest();
+        return;
+      }
       setSession(session);
       // Unblock UI immediately — profile loads in background (voice must not wait)
       setLoading(false);
@@ -89,6 +159,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription: authSubscription } } = supabase!.auth.onAuthStateChange((_event, session) => {
+      // "No Supabase user" is the normal state for a guest — ignore it rather
+      // than throwing them back to the sign-in wall.
+      if (!session && guestModeRef.current) return;
+
+      guestModeRef.current = false;
       setSession(session);
       setLoading(false);
       if (session?.user) {
@@ -132,12 +207,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
       supabase!.removeChannel(profileSubscription);
     };
   }, [session?.user?.id]);
-
-  const continueAsGuest = useCallback((preferredTranslation: Profile['preferred_translation'] = 'NIV') => {
-    setSession(createGuestSession());
-    setProfile(createGuestProfile(preferredTranslation));
-    setLoading(false);
-  }, []);
 
   const fetchProfile = async (userId: string, retries = 3): Promise<Profile | null> => {
     try {
@@ -233,6 +302,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         if (error) console.warn('[UserContext] Supabase sign out warning:', error.message);
       }
     } finally {
+      guestModeRef.current = false;
       profileFetchInFlightRef.current = null;
       setSession(null);
       setProfile(null);
