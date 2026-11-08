@@ -221,6 +221,25 @@ export default function AuthScreen() {
           <Text style={styles.mainTitle}>ENTER SANCTUARY</Text>
 
           <View style={styles.form}>
+            {/* Guest entry sits above the form: most first-time visitors want
+                a verse, not an account. Signing up is still one tap away. */}
+            {!isResettingPassword && (
+              <View style={styles.guestFirstBlock}>
+                <TouchableOpacity
+                  style={styles.guestButton}
+                  onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}
+                >
+                  <Text style={styles.guestButtonText}>CONTINUE AS GUEST — FIND A VERSE NOW</Text>
+                </TouchableOpacity>
+                <Text style={styles.guestFirstHint}>No account needed. Start in seconds.</Text>
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>Or save your verses</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+              </View>
+            )}
+
             {error && (
               <View style={styles.errorContainer}>
                 <Text style={styles.errorText}>{error}</Text>
@@ -293,15 +312,6 @@ export default function AuthScreen() {
                 onPress={() => setIsSignUp(true)}
               >
                 <Text style={styles.createAccountText}>CREATE FREE ACCOUNT</Text>
-              </TouchableOpacity>
-            )}
-
-            {!isResettingPassword && (
-              <TouchableOpacity
-                style={styles.guestButton}
-                onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}
-              >
-                <Text style={styles.guestButtonText}>CONTINUE AS GUEST — FIND A VERSE NOW</Text>
               </TouchableOpacity>
             )}
 
@@ -591,6 +601,37 @@ const styles = StyleSheet.create({
   createAccountText: {
     color: 'rgba(239, 199, 68, 0.7)',
     fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontFamily: 'Cinzel',
+  },
+  guestFirstBlock: {
+    width: '100%',
+  },
+  guestFirstHint: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: -8,
+    marginBottom: 18,
+    letterSpacing: 0.3,
+    fontFamily: 'Playfair Display',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 18,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(239, 199, 68, 0.25)',
+  },
+  dividerText: {
+    color: 'rgba(239, 199, 68, 0.6)',
+    fontSize: 9,
     fontWeight: '700',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
