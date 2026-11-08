@@ -119,6 +119,25 @@ export default function AuthScreen() {
     }
   };
 
+  const davidAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [davidPlaying, setDavidPlaying] = useState(false);
+  const toggleMeetDavid = () => {
+    try {
+      if (!davidAudioRef.current) {
+        const a = new Audio('/audio/david-invite.mp3');
+        a.preload = 'none';
+        a.onended = () => setDavidPlaying(false);
+        a.onerror = () => setDavidPlaying(false);
+        a.onpause = () => setDavidPlaying(false);
+        davidAudioRef.current = a;
+      }
+      const a = davidAudioRef.current;
+      if (a.paused) { a.currentTime = 0; a.play().then(() => setDavidPlaying(true)).catch(() => setDavidPlaying(false)); }
+      else { a.pause(); setDavidPlaying(false); }
+    } catch { setDavidPlaying(false); }
+  };
+  React.useEffect(() => () => { try { davidAudioRef.current?.pause(); } catch {} }, []);
+
   if (confirmationSentTo) {
     return (
       <FullScreenBackground center={false}>
@@ -155,25 +174,6 @@ export default function AuthScreen() {
       </FullScreenBackground>
     );
   }
-
-  const davidAudioRef = React.useRef<HTMLAudioElement | null>(null);
-  const [davidPlaying, setDavidPlaying] = useState(false);
-  const toggleMeetDavid = () => {
-    try {
-      if (!davidAudioRef.current) {
-        const a = new Audio('/audio/david-invite.mp3');
-        a.preload = 'none';
-        a.onended = () => setDavidPlaying(false);
-        a.onerror = () => setDavidPlaying(false);
-        a.onpause = () => setDavidPlaying(false);
-        davidAudioRef.current = a;
-      }
-      const a = davidAudioRef.current;
-      if (a.paused) { a.currentTime = 0; a.play().then(() => setDavidPlaying(true)).catch(() => setDavidPlaying(false)); }
-      else { a.pause(); setDavidPlaying(false); }
-    } catch { setDavidPlaying(false); }
-  };
-  React.useEffect(() => () => { try { davidAudioRef.current?.pause(); } catch {} }, []);
 
   return (
     <FullScreenBackground center={false}>
