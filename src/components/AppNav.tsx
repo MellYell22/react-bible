@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, useWindowDimensions } from 'react-native';
 import { Globe2, Menu, Search, Settings, User as UserIcon } from 'lucide-react';
 import { APP_COLORS, APP_FONTS } from '../designSystem';
 import { useUser } from '../UserContext';
@@ -13,7 +13,8 @@ type Props = {
   onLogout?: () => void;
 };
 
-export default function AppNav({ current, navigation }: Props) {
+export default function AppNav({ current, navigation, onLogout }: Props) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const { width } = useWindowDimensions();
   const compact = width < 760;
   const veryCompact = width < 520;
@@ -23,8 +24,19 @@ export default function AppNav({ current, navigation }: Props) {
 
   return (
     <View style={[styles.shell, brandMode && styles.shellBrand, compact && styles.shellCompact]}>
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <View style={styles.menuOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setMenuOpen(false)} accessibilityRole="button" accessibilityLabel="Close menu" />
+          <View style={styles.menuPanel}>
+            <TouchableOpacity onPress={() => setMenuOpen(false)} accessibilityRole="button" accessibilityLabel="Close navigation menu" style={styles.menuItem}><Text style={styles.menuText}>Close menu</Text></TouchableOpacity>
+            {NAV_ITEMS.map(item => <TouchableOpacity key={item} accessibilityRole="button" onPress={() => { setMenuOpen(false); navigation.navigate(item); }} style={styles.menuItem}><Text style={styles.menuText}>{item}</Text></TouchableOpacity>)}
+            <TouchableOpacity accessibilityRole="button" onPress={() => { setMenuOpen(false); navigation.navigate('Pricing'); }} style={styles.menuItem}><Text style={styles.menuText}>Plans</Text></TouchableOpacity>
+            {onLogout && <TouchableOpacity accessibilityRole="button" onPress={() => { setMenuOpen(false); onLogout(); }} style={styles.menuItem}><Text style={styles.menuText}>Sign out</Text></TouchableOpacity>}
+          </View>
+        </View>
+      </Modal>
       <View style={[styles.utilityLeft, compact && styles.utilityLeftCompact]}>
-        <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Mood')} accessibilityRole="button" accessibilityLabel="Open menu">
+        <TouchableOpacity style={styles.iconButton} onPress={() => setMenuOpen(true)} accessibilityRole="button" accessibilityLabel="Open menu" accessibilityState={{ expanded: menuOpen }}>
           <Menu size={compact ? 15 : 17} color={APP_COLORS.gold} />
         </TouchableOpacity>
         <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Bible')} accessibilityRole="button" accessibilityLabel="Search scripture">
@@ -80,6 +92,10 @@ export default function AppNav({ current, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
+  menuPanel: { width: 280, maxWidth: '90%', backgroundColor: APP_COLORS.navyDeep, padding: 20, height: '100%' },
+  menuItem: { paddingVertical: 15, minHeight: 44 },
+  menuText: { color: APP_COLORS.gold, fontFamily: APP_FONTS.sans, fontSize: 16 },
   shell: {
     minHeight: 58,
     flexDirection: 'row',

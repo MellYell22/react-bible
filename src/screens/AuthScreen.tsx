@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { Globe, Menu, Search, User, Settings, Play, Pause } from 'lucide-react';
 import { supabase } from '../services/supabase';
@@ -18,8 +19,14 @@ import { BibleTranslation } from '../types';
 
 const TRANSLATIONS = ['NIV', 'KJV', 'NLT', 'ESV', 'NKJV', 'CSB'];
 
-export default function AuthScreen() {
+export default function AuthScreen({ onComplete }: { onComplete: () => void }) {
   const { continueAsGuest } = useUser();
+  const enterAsGuest = (translation: BibleTranslation) => {
+    setMenuOpen(false);
+    continueAsGuest(translation);
+    onComplete();
+  };
+  const [menuOpen, setMenuOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -89,6 +96,7 @@ export default function AuthScreen() {
           // Email confirmation is off for this project: the session is live
           // and the app shell will move on to onboarding automatically.
           setConfirmationSentTo(null);
+          onComplete();
         } else {
           // No session yet: the account needs email confirmation first.
           setConfirmationSentTo(email);
@@ -96,6 +104,7 @@ export default function AuthScreen() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        onComplete();
       }
     } catch (error: any) {
       setError(error.message);
@@ -164,7 +173,7 @@ export default function AuthScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.guestButton}
-                onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}
+                onPress={() => enterAsGuest(preferredTranslation as BibleTranslation)}
               >
                 <Text style={styles.guestButtonText}>CONTINUE AS GUEST — FIND A VERSE NOW</Text>
               </TouchableOpacity>
@@ -177,13 +186,24 @@ export default function AuthScreen() {
 
   return (
     <FullScreenBackground center={false}>
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <View style={styles.menuOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} onPress={() => setMenuOpen(false)} accessibilityRole="button" accessibilityLabel="Close menu" />
+          <View style={styles.menuPanel}>
+            <TouchableOpacity style={styles.menuItem} accessibilityRole="button" onPress={() => setMenuOpen(false)}><Text style={styles.menuText}>Close menu</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} accessibilityRole="button" onPress={() => enterAsGuest(preferredTranslation as BibleTranslation)}><Text style={styles.menuText}>Find a verse as guest</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} accessibilityRole="button" onPress={() => { setIsSignUp(true); setIsResettingPassword(false); setMenuOpen(false); }}><Text style={styles.menuText}>Create a free account</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} accessibilityRole="button" onPress={() => { setIsSignUp(false); setIsResettingPassword(false); setMenuOpen(false); }}><Text style={styles.menuText}>Sign in</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <TouchableOpacity style={styles.headerIcon} accessibilityLabel="Explore as guest" onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}>
+            <TouchableOpacity style={styles.headerIcon} accessibilityLabel="Open menu" accessibilityRole="button" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen(true)}>
               <Menu size={20} color="#efc744" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.headerIcon} accessibilityLabel="Explore scripture as guest" onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}>
+            <TouchableOpacity style={styles.headerIcon} accessibilityLabel="Explore scripture as guest" onPress={() => enterAsGuest(preferredTranslation as BibleTranslation)}>
               <Search size={20} color="#efc744" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerIcon} accessibilityLabel="Sign in" onPress={() => {setIsSignUp(false);setIsResettingPassword(false);}}>
@@ -263,7 +283,7 @@ export default function AuthScreen() {
               <View style={styles.guestFirstBlock}>
                 <TouchableOpacity
                   style={styles.guestButton}
-                  onPress={() => continueAsGuest(preferredTranslation as BibleTranslation)}
+                  onPress={() => enterAsGuest(preferredTranslation as BibleTranslation)}
                 >
                   <Text style={styles.guestButtonText}>CONTINUE AS GUEST — FIND A VERSE NOW</Text>
                 </TouchableOpacity>
@@ -382,6 +402,10 @@ const NAVY = '#00213d';
 const DARK_NAVY = '#00213d';
 
 const styles = StyleSheet.create({
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
+  menuPanel: { width: 280, maxWidth: '90%', height: '100%', backgroundColor: '#071a35', padding: 20 },
+  menuItem: { paddingVertical: 15, minHeight: 44 },
+  menuText: { color: '#efc744', fontSize: 16 },
   container: {
     flex: 1,
     backgroundColor: NAVY,

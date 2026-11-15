@@ -149,6 +149,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         continueAsGuest();
         return;
       }
+      // A late initial-session response must not overwrite a guest choice.
+      if (!session && guestModeRef.current) return;
       setSession(session);
       // Unblock UI immediately — profile loads in background (voice must not wait)
       setLoading(false);

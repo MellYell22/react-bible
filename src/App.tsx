@@ -107,7 +107,7 @@ function AppShell() {
   if (!session || route.name === 'Auth') {
     return (
       <View nativeID="auth-design-shell" style={styles.routeShell}>
-        <AuthScreen />
+        <AuthScreen onComplete={() => setRoute({ name: 'Mood' })} />
       </View>
     );
   }
