@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 const DEFAULT_LIMIT = 20;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_LIMIT = 50;
 
 const clean = (value: unknown, max: number): string =>
@@ -47,7 +48,7 @@ export default async function handler(req: any, res: any) {
     128,
   );
 
-  if (!userId || userId === 'guest') {
+  if (!UUID_PATTERN.test(userId)) {
     return res.status(400).json({ error: 'A valid user_id is required' });
   }
 
