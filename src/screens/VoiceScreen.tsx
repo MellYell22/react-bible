@@ -30,6 +30,22 @@ import { getVoiceSessionGreeting } from '../constants/persona';
 import { PLANS } from '../constants';
 
 const VOICE_TRIAL_USED_UP_MESSAGE = "That's the end of your free time with David's voice. Upgrade to Pro to keep talking.";
+// Pro includes 60 minutes of live conversation per billing period.
+const PRO_VOICE_MINUTES_USED_UP_MESSAGE = "You've used this month's 60 minutes with David. Your minutes reset at the start of your next billing period.";
+// How often a live Pro conversation reports its talk time to the server.
+const PRO_VOICE_HEARTBEAT_MS = 15000;
+
+const formatResetDate = (iso: string | null): string | null => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
+};
+
+const formatMinutesLeft = (seconds: number): string => {
+  const minutes = Math.ceil(Math.max(0, seconds) / 60);
+  return minutes === 1 ? '1 minute left this month' : `${minutes} minutes left this month`;
+};
 
 const IDLE_VOICE_LEVELS = [0.18, 0.26, 0.2, 0.3, 0.22, 0.34, 0.24, 0.31, 0.2];
 
@@ -166,6 +182,18 @@ export default function VoiceScreen({ navigation }: any) {
   const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [trialVoiceRepliesRemaining, setTrialVoiceRepliesRemaining] = useState<number | null>(null);
   const [trialUsageLoading, setTrialUsageLoading] = useState(true);
+  // Pro minutes left this billing period. `null` means unmetered (owner) or
+  // not known yet — never "none left".
+  const [proVoiceSecondsRemaining, setProVoiceSecondsRemaining] = useState<number | null>(null);
+  const [proVoiceResetsAt, setProVoiceResetsAt] = useState<string | null>(null);
+  const proHeartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const proLastTickAtRef = useRef<number | null>(null);
+  const proSpendChainRef = useRef<Promise<void>>(Promise.resolve());
+  // The minutes ran out while David was mid-sentence; close once he finishes.
+  const proMinutesPendingRef = useRef(false);
+  const agentSpeakingRef = useRef(false);
+  // The heartbeat timer outlives renders; it always calls the latest handler.
+  const runProHeartbeatRef = useRef<() => void>(() => {});
   // David's opening greeting is free, so only replies that answer something
   // the person actually said are counted.
   const userHasSpokenRef = useRef(false);
@@ -224,10 +252,13 @@ export default function VoiceScreen({ navigation }: any) {
   // move is to let the person start and let the server answer. Treating an
   // unknown count as zero is what used to send signed-in people with a full
   // trial straight to the upgrade wall, before any request was even made.
+  const proMinutesUsedUp = hasPaidVoiceAccess
+    && proVoiceSecondsRemaining !== null
+    && proVoiceSecondsRemaining <= 0;
   const hasVoiceAccess = hasPaidVoiceAccess
-    || trialVoiceRepliesRemaining === null
-    || trialVoiceRepliesRemaining > 0;
-  const voiceAccessChecking = !hasPaidVoiceAccess && (userContextLoading || trialUsageLoading);
+    ? !proMinutesUsedUp
+    : (trialVoiceRepliesRemaining === null || trialVoiceRepliesRemaining > 0);
+  const voiceAccessChecking = userContextLoading || trialUsageLoading;
 
   /**
    * The access token can lag a moment behind the session on a cold load or a
@@ -248,8 +279,30 @@ export default function VoiceScreen({ navigation }: any) {
     throw new Error('Please sign in to try David.');
   };
 
+  /** Applies the server's Pro minute summary; null means unmetered. */
+  const applyProVoiceSummary = (pro: any) => {
+    if (!pro) { setProVoiceSecondsRemaining(null); setProVoiceResetsAt(null); return; }
+    const remaining = Number(pro.remainingSeconds);
+    setProVoiceSecondsRemaining(Number.isFinite(remaining) ? remaining : null);
+    setProVoiceResetsAt(typeof pro.resetsAt === 'string' ? pro.resetsAt : null);
+  };
+
   const refreshTrialUsage = async () => {
-    if (hasPaidVoiceAccess) { setTrialVoiceRepliesRemaining(null); setTrialUsageLoading(false); return; }
+    if (hasPaidVoiceAccess) {
+      setTrialVoiceRepliesRemaining(null);
+      try {
+        const response = await fetch('/api/david-trial', { headers: await getTrialHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error || 'Unable to check your minutes with David.');
+        applyProVoiceSummary(data?.voice?.pro ?? null);
+      } catch (proError) {
+        // Could not read the minutes. Let the person start; the heartbeat
+        // meter on the server still stops the conversation at 60 minutes.
+        console.error('[David Voice] Pro minutes check failed:', proError);
+        setProVoiceSecondsRemaining(null);
+      } finally { setTrialUsageLoading(false); }
+      return;
+    }
     // A guest has no account to hold a trial, and already sees the sign-up
     // card rather than this one.
     if (isGuest) { setTrialVoiceRepliesRemaining(0); setTrialUsageLoading(false); return; }
@@ -908,7 +961,9 @@ export default function VoiceScreen({ navigation }: any) {
   useEffect(() => {
     if (userContextLoading) return;
     if (hasVoiceAccess) {
-      setError(current => (current === VOICE_TRIAL_USED_UP_MESSAGE ? null : current));
+      setError(current => (
+        current === VOICE_TRIAL_USED_UP_MESSAGE || current === PRO_VOICE_MINUTES_USED_UP_MESSAGE ? null : current
+      ));
       // This screen is the only place voice mode is ever switched on.
       setVoiceModeActive(true);
       setPhase(current => (current === 'checking' ? 'idle' : current));
@@ -1018,8 +1073,15 @@ export default function VoiceScreen({ navigation }: any) {
       // The free replies ran out on this very turn. Stop the conversation
       // where it stands and show the upgrade wall instead of an error.
       if (isChatLimitReachedError(err)) {
-        setTrialVoiceRepliesRemaining(0);
         void endVoiceSessionForPaywall();
+        if (hasPaidVoiceAccess) {
+          // A Pro account whose 60 minutes are spent — not an upgrade wall.
+          setProVoiceSecondsRemaining(0);
+          setError(PRO_VOICE_MINUTES_USED_UP_MESSAGE);
+          setPhase('ended');
+          return;
+        }
+        setTrialVoiceRepliesRemaining(0);
         setError(VOICE_TRIAL_USED_UP_MESSAGE);
         setPhase('ended');
         return;
@@ -1041,7 +1103,10 @@ export default function VoiceScreen({ navigation }: any) {
   const handleStartConversation = async () => {
     if (elevenLabsConversation.status !== 'disconnected') return;
     if (voiceAccessChecking) return;
-    if (!hasVoiceAccess) { setError(VOICE_TRIAL_USED_UP_MESSAGE); return; }
+    if (!hasVoiceAccess) {
+      setError(hasPaidVoiceAccess ? PRO_VOICE_MINUTES_USED_UP_MESSAGE : VOICE_TRIAL_USED_UP_MESSAGE);
+      return;
+    }
 
     const userId = session?.user?.id || profile?.id || 'guest';
 
@@ -1062,6 +1127,7 @@ export default function VoiceScreen({ navigation }: any) {
       userHasSpokenRef.current = false;
       countedReplyIdsRef.current = new Set();
       paywallPendingRef.current = false;
+      proMinutesPendingRef.current = false;
 
       await elevenLabsConversation.startSession({
         agentId: 'agent_1901m3h52nn7e5xtyze0e3rkb6q5',
@@ -1109,6 +1175,85 @@ export default function VoiceScreen({ navigation }: any) {
   };
 
   /**
+   * Reports Pro talk time since the last report. Returns false once this
+   * period's 60 minutes are spent and the conversation must stop.
+   *
+   * A network failure is not a lockout — the time is reported again on the
+   * next tick, and the server's count is what decides.
+   */
+  const reportProVoiceTime = async (): Promise<boolean> => {
+    const lastTick = proLastTickAtRef.current;
+    const now = Date.now();
+    if (lastTick === null) return true;
+    const seconds = Math.min(60, Math.max(0, Math.round((now - lastTick) / 1000)));
+    if (seconds <= 0) return true;
+    try {
+      const response = await fetch('/api/david-trial', {
+        method: 'POST',
+        headers: await getTrialHeaders(),
+        body: JSON.stringify({ proSeconds: seconds }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Could not record voice time.');
+      // Only advance the clock once the time is actually recorded.
+      proLastTickAtRef.current = now;
+      const pro = data?.voice?.pro;
+      if (!pro) return true; // owner: unmetered
+      applyProVoiceSummary(pro);
+      return Number(pro.remainingSeconds) > 0;
+    } catch (reportError) {
+      console.error('[David Voice] Could not record Pro voice time:', reportError);
+      return true;
+    }
+  };
+
+  const stopProHeartbeat = () => {
+    if (proHeartbeatTimerRef.current) clearInterval(proHeartbeatTimerRef.current);
+    proHeartbeatTimerRef.current = null;
+  };
+
+  /** Pro minutes ran out: let David finish his sentence, then close. */
+  const finishForProMinutes = () => {
+    proMinutesPendingRef.current = false;
+    stopProHeartbeat();
+    proLastTickAtRef.current = null;
+    setProVoiceSecondsRemaining(0);
+    setError(PRO_VOICE_MINUTES_USED_UP_MESSAGE);
+    setPhase('ended');
+    void endVoiceSessionForPaywall();
+  };
+
+  const runProHeartbeat = () => {
+    proSpendChainRef.current = proSpendChainRef.current.then(async () => {
+      const mayContinue = await reportProVoiceTime();
+      if (mayContinue || !mountedRef.current) return;
+      if (agentSpeakingRef.current) {
+        proMinutesPendingRef.current = true;
+        return;
+      }
+      finishForProMinutes();
+    });
+  };
+
+  // While a Pro conversation is live, count its time against the monthly 60
+  // minutes. Free accounts are metered per reply instead; the owner is
+  // never metered (the server answers with no Pro summary).
+  useEffect(() => {
+    const connected = elevenLabsConversation.status === 'connected';
+    if (!connected || !hasPaidVoiceAccess) return undefined;
+
+    proLastTickAtRef.current = Date.now();
+    proHeartbeatTimerRef.current = setInterval(() => runProHeartbeatRef.current(), PRO_VOICE_HEARTBEAT_MS);
+
+    return () => {
+      stopProHeartbeat();
+      // Record the last stretch of the call when it ends.
+      if (proLastTickAtRef.current !== null) runProHeartbeatRef.current();
+      proSpendChainRef.current = proSpendChainRef.current.then(() => { proLastTickAtRef.current = null; });
+    };
+  }, [elevenLabsConversation.status, hasPaidVoiceAccess]);
+
+  /**
    * Watches the live agent conversation. David's replies are what the trial
    * is counted in, and they only exist inside this stream — the app's own
    * chat endpoint is never called during a spoken conversation.
@@ -1148,7 +1293,9 @@ export default function VoiceScreen({ navigation }: any) {
    * he gets to finish his sentence first.
    */
   const handleAgentModeChange = ({ mode }: { mode: string }) => {
+    agentSpeakingRef.current = mode === 'speaking';
     if (mode === 'speaking') return;
+    if (proMinutesPendingRef.current) { finishForProMinutes(); return; }
     if (!paywallPendingRef.current) return;
     paywallPendingRef.current = false;
 
@@ -1183,6 +1330,7 @@ export default function VoiceScreen({ navigation }: any) {
   // always reach the current handlers. Without this the counter never runs.
   onAgentMessageRef.current = handleAgentMessage;
   onAgentModeChangeRef.current = handleAgentModeChange;
+  runProHeartbeatRef.current = runProHeartbeat;
 
   const handleEndConversation = async () => {
     if (elevenLabsConversation.status === 'disconnected') return;
@@ -1266,6 +1414,27 @@ export default function VoiceScreen({ navigation }: any) {
             <Text style={styles.lockUpgradeButtonText}>Create Free Account</Text>
           </TouchableOpacity>
           <Text style={styles.lockUpgradeHint}>Your free usage stays with your account, so you can continue where you left off.</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!userContextLoading && !trialUsageLoading && proMinutesUsedUp) {
+    const resetDate = formatResetDate(proVoiceResetsAt);
+    return (
+      <View style={styles.lockedContainer}>
+        <View style={styles.lockCard}>
+          <Sparkles color="#d4af37" size={48} style={{ marginBottom: 20 }} />
+          <Text style={styles.lockTitle} role="heading" aria-level={1}>See you soon</Text>
+          <Text style={styles.lockText}>
+            You've used this month's 60 minutes of conversation with David. Thank you for spending that time with him.
+          </Text>
+          <Text style={styles.lockUpgradeHint}>
+            {resetDate
+              ? `Your minutes reset on ${resetDate}, at the start of your next billing period.`
+              : 'Your minutes reset at the start of your next billing period.'}
+          </Text>
+          <Text style={styles.lockUpgradeHint}>You can still chat with David by text anytime.</Text>
         </View>
       </View>
     );
@@ -1397,6 +1566,11 @@ export default function VoiceScreen({ navigation }: any) {
           </View>
         </View>
 
+        {hasPaidVoiceAccess && !voiceAccessChecking && proVoiceSecondsRemaining !== null && (
+          <View style={styles.trialUpgradeRow}>
+            <Text style={styles.trialVoiceCounter}>{formatMinutesLeft(proVoiceSecondsRemaining)}</Text>
+          </View>
+        )}
         {!hasPaidVoiceAccess && voiceAccessChecking && (
           <Text style={styles.trialVoiceCounter}>Checking your free replies…</Text>
         )}

@@ -1,6 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { ENTITLEMENT_COLUMNS, canUsePremium, canUsePro, resolveAccessTier } from '../lib/subscriptionState.js';
-import { FREE_VOICE_TRIAL_MESSAGES } from '../lib/chatAccess.js';
+import {
+  FREE_VOICE_TRIAL_MESSAGES,
+  PRO_VOICE_RPC,
+  PRO_VOICE_SECONDS_PER_PERIOD,
+  getProVoicePeriodEnd,
+  readProVoiceSecondsUsed,
+} from '../lib/chatAccess.js';
 
 const TEXT_LIMIT = 25;
 
@@ -14,6 +20,15 @@ const getBearerToken = (req: any) => {
 
 const json = (res: any, status: number, body: any) => res.status(status).json(body);
 
+const readBody = (req: any): any => {
+  const body = req?.body;
+  if (!body) return {};
+  if (typeof body === 'string') {
+    try { return JSON.parse(body); } catch { return {}; }
+  }
+  return body;
+};
+
 const clients = (token: string) => {
   const url = firstConfigured(process.env.SUPABASE_URL, process.env.VITE_SUPABASE_URL);
   const verifyKey = firstConfigured(process.env.SUPABASE_ANON_KEY, process.env.VITE_SUPABASE_ANON_KEY, process.env.SB_PUBLISHABLE_KEY);
@@ -25,15 +40,33 @@ const clients = (token: string) => {
   };
 };
 
+/** What a Pro account sees about its monthly voice minutes. */
+const proVoiceSummary = (usedSeconds: number, periodEnd: string) => {
+  const used = Math.min(Math.max(0, usedSeconds), PRO_VOICE_SECONDS_PER_PERIOD);
+  const remaining = Math.max(0, PRO_VOICE_SECONDS_PER_PERIOD - used);
+  return {
+    limitSeconds: PRO_VOICE_SECONDS_PER_PERIOD,
+    usedSeconds: used,
+    remainingSeconds: remaining,
+    resetsAt: periodEnd,
+    allowed: remaining > 0,
+  };
+};
+
 export default async function handler(req: any, res: any) {
-  // GET reports what is left. POST spends one spoken reply.
+  // GET reports what is left.
+  // POST spends it:
+  //   - free accounts: one spoken reply of the 5-reply trial (empty body);
+  //   - Pro accounts: talk time from the Voice screen's heartbeat, sent as
+  //     { "proSeconds": n }. The database caps a single call at 60 seconds.
+  // The owner account is never metered.
   //
   // The live voice conversation runs inside the ElevenLabs agent, so David's
   // replies never pass through this app's own chat endpoint and cannot be
-  // metered there. The Voice screen watches the agent's replies and posts
-  // here as each one lands. The count itself lives in the database and is
-  // decremented under a row lock, so it survives reloads, new sessions and
-  // other devices, and cannot be reset by clearing site data.
+  // metered there. The Voice screen reports here as the conversation runs.
+  // The counts live in the database and are updated under a row lock, so
+  // they survive reloads, new sessions and other devices, and cannot be
+  // reset by clearing site data.
   if (req.method !== 'GET' && req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
 
@@ -51,8 +84,33 @@ export default async function handler(req: any, res: any) {
     const owner = tier === 'owner';
     const paidText = canUsePremium(tier);
     const paidVoice = canUsePro(tier);
+    const meteredPro = tier === 'pro';
+    const periodEnd = meteredPro ? getProVoicePeriodEnd(profile) : null;
 
-    // Spend one spoken reply. Paid voice is never metered.
+    if (req.method === 'POST' && meteredPro) {
+      // Spend Pro talk time.
+      const body = readBody(req);
+      const seconds = Math.round(Number(body?.proSeconds ?? 0));
+      const spend = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), 60) : 0;
+      const { data: rows, error: consumeError } = await service.rpc(PRO_VOICE_RPC, {
+        p_user_id: user.id,
+        p_period_end: periodEnd,
+        p_seconds: spend,
+      });
+      if (consumeError) throw consumeError;
+      const row: any = Array.isArray(rows) ? rows[0] : rows;
+      const usedSeconds = Number(row?.seconds_used ?? PRO_VOICE_SECONDS_PER_PERIOD);
+      return json(res, 200, {
+        tier,
+        owner,
+        voice: {
+          paid: true,
+          pro: proVoiceSummary(usedSeconds, periodEnd as string),
+        },
+      });
+    }
+
+    // Spend one spoken reply of the free trial. Paid voice is never charged here.
     if (req.method === 'POST' && !paidVoice) {
       const { data: rows, error: consumeError } = await service.rpc(
         'consume_david_intro_voice_message',
@@ -80,16 +138,26 @@ export default async function handler(req: any, res: any) {
     const textUsed = Number(usage?.text_messages_used || 0);
     const voiceUsed = Number(usage?.voice_messages_used || 0);
 
+    let pro: ReturnType<typeof proVoiceSummary> | null = null;
+    if (meteredPro) {
+      const usedSeconds = await readProVoiceSecondsUsed(service as any, user.id, periodEnd as string);
+      if (usedSeconds === null) throw new Error('Pro voice usage is unavailable.');
+      pro = proVoiceSummary(usedSeconds, periodEnd as string);
+    }
+
     return json(res, 200, {
       tier,
       owner,
       text: { paid: paidText, limit: TEXT_LIMIT, used: textUsed, remaining: paidText ? null : Math.max(0, TEXT_LIMIT - textUsed) },
-      // Spoken exchanges, not minutes. Spent one at a time by POST above.
       voice: {
         paid: paidVoice,
         limit: FREE_VOICE_TRIAL_MESSAGES,
         used: voiceUsed,
+        // Free trial: spoken exchanges, spent one at a time by POST above.
         remaining: paidVoice ? null : Math.max(0, FREE_VOICE_TRIAL_MESSAGES - voiceUsed),
+        // Pro: minutes this billing period. Null for the owner (unmetered)
+        // and for anyone without Pro.
+        pro,
       },
     });
   } catch (error: any) {

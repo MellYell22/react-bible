@@ -35,6 +35,55 @@ export const FREE_DAILY_MESSAGE_LIMIT = 5;
  */
 export const FREE_VOICE_TRIAL_MESSAGES = 5;
 
+/**
+ * Live voice time included with David's Voice Pro, per billing period:
+ * 60 minutes. The same number is baked into `consume_david_pro_voice_seconds`
+ * in the database; both must move together. The owner account is unmetered.
+ */
+export const PRO_VOICE_SECONDS_PER_PERIOD = 60 * 60;
+
+export const PRO_VOICE_USAGE_TABLE = 'david_pro_voice_usage';
+export const PRO_VOICE_RPC = 'consume_david_pro_voice_seconds';
+
+/**
+ * The billing period a Pro account's minutes belong to, identified by when
+ * it ends. Stripe moves `stripe_current_period_end` forward on every renewal,
+ * so a new period means a new usage row and the minutes reset by themselves.
+ *
+ * A Pro tier cannot resolve without a period end (see
+ * hasActivePaidSubscription), so the calendar-month fallback is only a
+ * safety net: it still meters, it never hands out unlimited time.
+ */
+export const getProVoicePeriodEnd = (profile: any, now: Date = new Date()): string => {
+  const raw = profile?.stripe_current_period_end;
+  const parsed = raw ? new Date(raw) : null;
+  if (parsed && Number.isFinite(parsed.getTime())) return parsed.toISOString();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
+};
+
+/** Seconds of Pro voice time already used this period, or null if unreadable. */
+export const readProVoiceSecondsUsed = async (
+  client: SupabaseClient,
+  userId: string,
+  periodEnd: string,
+): Promise<number | null> => {
+  const { data, error } = await client
+    .from(PRO_VOICE_USAGE_TABLE)
+    .select('seconds_used')
+    .eq('user_id', userId)
+    .eq('period_end', periodEnd)
+    .maybeSingle();
+  if (error) {
+    console.warn('[ChatAccess] Pro voice usage lookup failed:', error.message);
+    return null;
+  }
+  const used = Number((data as any)?.seconds_used ?? 0);
+  return Number.isFinite(used) ? used : 0;
+};
+
+export const PRO_VOICE_MINUTES_USED_UP_MESSAGE =
+  "You've used this month's 60 minutes with David. Your minutes reset at the start of your next billing period.";
+
 const USAGE_TABLE = 'david_conversation_memory';
 const VOICE_TRIAL_RPC = 'consume_david_intro_voice_message';
 const VOICE_TRIAL_TABLE = 'david_intro_trial_usage';
@@ -226,16 +275,35 @@ export const checkChatAccess = async (
   // Live voice is a Pro feature. Plus covers unlimited text only. The Voice
   // screen gates this in the UI; this closes the hole on the server so the
   // flag cannot be forged.
-  if (options.liveVoice ? canUsePro(tier) : canUsePremium(tier)) {
-    return allow('premium', tier, null, null);
-  }
-
   const serviceKey = getServiceKey();
   const usageClient = serviceKey
     ? createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
     : authClient;
+
+  // Pro voice includes 60 minutes per billing period. Talk time is counted
+  // by the Voice screen's heartbeat (api/david-trial.ts); this only checks,
+  // so a typed turn on the Voice screen cannot slip past a spent allowance.
+  // The owner is never metered. A failed read lets the turn through — the
+  // heartbeat meter still stops the conversation.
+  if (options.liveVoice && tier === 'pro' && serviceKey) {
+    const periodEnd = getProVoicePeriodEnd(profile);
+    const usedSeconds = await readProVoiceSecondsUsed(usageClient, user.id, periodEnd);
+    if (usedSeconds !== null && usedSeconds >= PRO_VOICE_SECONDS_PER_PERIOD) {
+      return deny(402, {
+        error: 'Voice minutes used',
+        message: PRO_VOICE_MINUTES_USED_UP_MESSAGE,
+        code: 'PRO_VOICE_MINUTES_EXHAUSTED',
+        limitReached: true,
+        tier,
+      });
+    }
+  }
+
+  if (options.liveVoice ? canUsePro(tier) : canUsePremium(tier)) {
+    return allow('premium', tier, null, null);
+  }
 
   if (options.liveVoice) {
     // Every non-Pro account gets a short free run of spoken exchanges, once.

@@ -116,9 +116,13 @@ test('an unmeterable trial refuses voice rather than giving it away free', () =>
 test('running out mid-conversation shows the upgrade wall, not an error', () => {
   const handler = source.slice(source.indexOf('if (isChatLimitReachedError(err))'));
   assert.ok(handler.length > 0, 'the limit error must be handled');
-  assert.match(handler.slice(0, 400), /setTrialVoiceRepliesRemaining\(0\)/);
-  assert.match(handler.slice(0, 400), /endVoiceSessionForPaywall\(\)/);
-  assert.match(handler.slice(0, 400), /setError\(VOICE_TRIAL_USED_UP_MESSAGE\)/);
+  const branch = handler.slice(0, 700);
+  assert.match(branch, /endVoiceSessionForPaywall\(\)/);
+  // Free accounts get the upgrade wall...
+  assert.match(branch, /setTrialVoiceRepliesRemaining\(0\)/);
+  assert.match(branch, /setError\(VOICE_TRIAL_USED_UP_MESSAGE\)/);
+  // ...a Pro account out of minutes gets the friendly reset message instead.
+  assert.match(branch, /if \(hasPaidVoiceAccess\) \{[\s\S]*?setError\(PRO_VOICE_MINUTES_USED_UP_MESSAGE\)/);
 });
 
 test('the paywall shutdown stops the microphone and audio', () => {
@@ -135,7 +139,7 @@ test('the paywall shutdown stops the microphone and audio', () => {
 test('an unknown reply count lets the person start, it does not wall them off', () => {
   assert.match(
     source,
-    /const hasVoiceAccess = hasPaidVoiceAccess\s*\n\s*\|\| trialVoiceRepliesRemaining === null\s*\n\s*\|\| trialVoiceRepliesRemaining > 0;/,
+    /: \(trialVoiceRepliesRemaining === null \|\| trialVoiceRepliesRemaining > 0\);/,
   );
   // Every path that cannot determine the count must leave it unknown (null),
   // never zero.
@@ -153,13 +157,14 @@ test('a lagging access token is retried instead of being read as signed out', ()
 });
 
 test('Start Conversation waits until the free replies are known', () => {
-  assert.match(source, /const voiceAccessChecking = !hasPaidVoiceAccess && \(userContextLoading \|\| trialUsageLoading\)/);
+  // Pro waits too now: its minutes left must be known before it can start.
+  assert.match(source, /const voiceAccessChecking = userContextLoading \|\| trialUsageLoading;/);
   assert.match(source, /startConversationIsEnabled = !voiceAccessChecking &&/);
-  assert.match(source, /if \(voiceAccessChecking\) return;\s*\n\s*if \(!hasVoiceAccess\) \{ setError\(VOICE_TRIAL_USED_UP_MESSAGE\)/);
+  assert.match(source, /if \(voiceAccessChecking\) return;\s*\n\s*if \(!hasVoiceAccess\) \{\s*\n\s*setError\(hasPaidVoiceAccess \? PRO_VOICE_MINUTES_USED_UP_MESSAGE : VOICE_TRIAL_USED_UP_MESSAGE\)/);
 });
 
 test('a stale "used up" message clears once voice access is confirmed', () => {
-  assert.match(source, /setError\(current => \(current === VOICE_TRIAL_USED_UP_MESSAGE \? null : current\)\)/);
+  assert.match(source, /current === VOICE_TRIAL_USED_UP_MESSAGE \|\| current === PRO_VOICE_MINUTES_USED_UP_MESSAGE \? null : current/);
 });
 
 test('every upgrade prompt comes with an upgrade button', () => {
